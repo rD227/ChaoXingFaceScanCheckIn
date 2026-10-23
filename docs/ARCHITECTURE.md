@@ -4,6 +4,8 @@
 
 第一版采用 Android App，网络请求和会话管理放在手机本机，不购买云服务器。网页加后端仅作为后续可选路线。
 
+0.1 实验版已实现 Android 原生界面，官方页面运行在独立 WebView 中，没有暴露 JavaScript-to-native 桥接。下图的共享网页界面为后续可选设计，并非当前代码的实现。
+
 ## 两条实现路线
 
 ```mermaid
@@ -79,3 +81,4 @@ App 的原生网络能力解决的是浏览器限制，不会自动满足超星�
 - [GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)
 - [CORS 与凭据](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)
 - [原生 HTTP API](https://capacitorjs.com/docs/apis/http)
+

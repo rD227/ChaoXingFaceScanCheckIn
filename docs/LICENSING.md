@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-仓库最初只有 GPL-3.0 许可证，没有业务代码。本次添加的是独立编写的架构文档，未引入前面讨论的第三方项目代码。
+仓库最初只有 GPL-3.0 许可证。当前实验 App 与架构文档为独立实现，未引入前面讨论的第三方签到项目代码；Gradle 依赖列在根目录 THIRD_PARTY_NOTICES.md。
 
 第一版选择保留原有 GPL-3.0 LICENSE。后续包元数据和发行说明应与实际使用的代码许可证保持一致。
 
@@ -43,3 +43,4 @@ MIT 允许后续使用者将其纳入闭源软件；如果希望衍生发行版�
 - [GPL-3.0 条文与概览](https://choosealicense.com/licenses/gpl-3.0/)
 - [AGPL-3.0 条文与概览](https://choosealicense.com/licenses/agpl-3.0/)
 - [MIT 条文与概览](https://choosealicense.com/licenses/mit/)
+
