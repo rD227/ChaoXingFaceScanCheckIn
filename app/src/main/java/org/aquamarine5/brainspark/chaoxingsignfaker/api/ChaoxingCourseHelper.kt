@@ -1,0 +1,212 @@
+/*
+ * Copyright (c) 2025-2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
+package org.aquamarine5.brainspark.chaoxingsignfaker.api
+
+import android.content.Context
+import android.widget.Toast
+import com.alibaba.fastjson2.JSONArray
+import com.alibaba.fastjson2.JSONObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Request
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingCourseEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.ChaoxingParseDataException
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.OnlyAppDevelopedMode
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.checkResponse
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.checkResponseThrowException
+
+object ChaoxingCourseHelper {
+    private val URL_COURSE_LIST =
+        "https://mooc1-api.chaoxing.com/mycourse/backclazzdata?view=json&rss=1".toHttpUrl()
+
+    private val URL_COURSE_QUERY_NAME =
+        "https://mooc1-api.chaoxing.com/gas/clazz?fields=name&view=json".toHttpUrl()
+
+    suspend fun queryClassName(client: ChaoxingHttpRequester, classId: Int): String = withContext(
+        Dispatchers.IO
+    ) {
+        client.newCall(
+            Request.Builder().get().url(
+                URL_COURSE_QUERY_NAME.newBuilder()
+                    .addQueryParameter("id", classId.toString()).build()
+            ).build()
+        ).execute().use {
+            return@use JSONObject.parseObject(it.body.string()).getJSONArray("data")
+                .getJSONObject(0).getString("name")
+        }
+    }
+
+    suspend fun checkClassValid(
+        client: ChaoxingHttpRequester,
+        classId: Int,
+    ): Boolean? = withContext(Dispatchers.IO) {
+        client.newCall(Request.Builder().get().url(URL_COURSE_LIST).build()).execute().use {
+            val jsonResult = JSONObject.parseObject(it.body.string())
+            val channelList = jsonResult.getJSONArray("channelList")
+            if (jsonResult.getInteger("result") == 0 || channelList == null) {
+                return@use null
+            }
+            for (i in channelList.indices) {
+                if (channelList.getJSONObject(i).getJSONObject("content")
+                        .getInteger("id") == classId
+                )
+                    return@use true
+            }
+            return@use false
+        }
+    }
+
+    suspend fun getClassIdFromCourseId(
+        client: ChaoxingHttpRequester,
+        courseId: Long
+    ): Result<Int?> = withContext(Dispatchers.IO) {
+        runCatching {
+            client.newCall(Request.Builder().get().url(URL_COURSE_LIST).build()).execute()
+                .use { rawResponse ->
+                    val jsonResult = JSONObject.parseObject(rawResponse.body.string())
+                    val channelList = jsonResult.getJSONArray("channelList")
+                    for (i in channelList.indices) {
+                        val course = channelList.getJSONObject(i)
+                        val content = course.getJSONObject("content")
+                        if (!content.containsKey("course")) continue
+                        if (!course.containsKey("cataName")) continue
+                        val courseContent =
+                            content.getJSONObject("course").getJSONArray("data").getJSONObject(0)
+                        if (courseContent.getLong("id") == courseId)
+                            return@runCatching content.getInteger("id")
+                    }
+                    return@runCatching null
+                }
+        }
+    }
+
+    suspend fun getCourseIdFromClassId(
+        client: ChaoxingHttpRequester,
+        classId: Int
+    ): Result<Long?> = withContext(Dispatchers.IO) {
+        runCatching {
+            client.newCall(Request.Builder().get().url(URL_COURSE_LIST).build()).execute()
+                .use { rawResponse ->
+                    val jsonResult = JSONObject.parseObject(rawResponse.body.string())
+                    val channelList = jsonResult.getJSONArray("channelList")
+                    for (i in channelList.indices) {
+                        val course = channelList.getJSONObject(i)
+                        val content = course.getJSONObject("content")
+                        if (!content.containsKey("course")) continue
+                        if (content.getIntValue("id") != classId) continue
+                        val courseContent =
+                            content.getJSONObject("course").getJSONArray("data").getJSONObject(0)
+                        return@runCatching courseContent.getLong("id")
+                    }
+                    return@runCatching null
+                }
+        }
+    }
+
+    private fun MutableList<ChaoxingCourseEntity>.parseCourseListData(
+        channelList: JSONArray,
+        isCloneSession: Boolean
+    ) {
+        for (i in channelList.indices) {
+            val course = channelList.getJSONObject(i)
+            val content = course.getJSONObject("content")
+            if (!content.containsKey("course")) continue
+            if (!course.containsKey("cataName")) continue
+            val courseContent =
+                content.getJSONObject("course").getJSONArray("data").getJSONObject(0)
+            runCatching {
+                add(
+                    ChaoxingCourseEntity(
+                        courseContent.getString("name"),
+                        courseContent.getString("teacherfactor"),
+                        courseContent.getLong("id"),
+                        content.getInteger("id"),
+                        courseContent.getString("name"),
+                        courseContent.getString("imageurl")
+                            ?: "https://p.ananas.chaoxing.com/star3/270_160c/669ca80d6a0c5f74835bb936a41aabca.jpg",
+                        courseContent.getString("schools"),
+                        isCloneSession = isCloneSession
+                    )
+                )
+            }.getOrElse {
+            }
+        }
+    }
+
+    @OnlyAppDevelopedMode
+    suspend fun getAllCourse(client: ChaoxingHttpClient): List<ChaoxingCourseEntity> =
+        withContext(Dispatchers.IO) {
+            buildList {
+                client.newCall(Request.Builder().get().url(URL_COURSE_LIST).build()).execute()
+                    .use { rawResponse ->
+                        rawResponse.checkResponseThrowException()
+                        val jsonResult = JSONObject.parseObject(rawResponse.body.string())
+                        val channelList = jsonResult.getJSONArray("channelList")
+                        parseCourseListData(channelList, isCloneSession = false)
+                    }
+            }
+        }
+
+    suspend fun getAllCourse(
+        client: ChaoxingHttpClient,
+        context: Context,
+        isCloneSession: Boolean,
+        naviToLogin: () -> Unit
+    ): List<ChaoxingCourseEntity> =
+        withContext(Dispatchers.IO) {
+            buildList {
+                client.newCall(Request.Builder().get().url(URL_COURSE_LIST).build()).execute()
+                    .use { rawResponse ->
+                        if (rawResponse.checkResponse(context)) {
+                            withContext(Dispatchers.Main) {
+                                naviToLogin()
+                            }
+                            return@withContext emptyList<ChaoxingCourseEntity>()
+                        }
+                        var jsonResult = JSONObject.parseObject(rawResponse.body.string())
+                        var channelList = jsonResult.getJSONArray("channelList")
+                        if (jsonResult.getInteger("result") == 0 || channelList == null) {
+                            if (client.reLogin(context).not()) {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(
+                                        context,
+                                        "登录信息已过期，请重新登录",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    naviToLogin()
+                                }
+                                return@withContext emptyList<ChaoxingCourseEntity>()
+                            } else {
+                                client.newCall(Request.Builder().get().url(URL_COURSE_LIST).build())
+                                    .execute().use {
+                                        if (it.checkResponse(context)) {
+                                            withContext(Dispatchers.Main) {
+                                                naviToLogin()
+                                            }
+                                            return@withContext emptyList<ChaoxingCourseEntity>()
+                                        }
+                                        jsonResult = JSONObject.parseObject(it.body.string())
+                                        channelList = jsonResult.getJSONArray("channelList")
+                                        if (jsonResult.getInteger("result") == 0 || channelList == null) {
+                                            withContext(Dispatchers.Main) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "登录信息已过期，请重新登录",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                                naviToLogin()
+                                            }
+                                        }
+                                    }
+                            }
+                        }
+                        parseCourseListData(channelList, isCloneSession)
+                    }
+            }
+        }
+}

@@ -1,9 +1,22 @@
+/*
+ * Copyright (c) 2025-2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
 pluginManagement {
     repositories { google(); mavenCentral(); gradlePluginPortal() }
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories { google(); mavenCentral() }
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            url = uri("https://jitpack.io")
+            content { includeModule("com.github.ihsg", "PatternLocker") }
+        }
+    }
 }
-rootProject.name = 'ChaoXingFaceScanCheckIn'
-include ':app'
+rootProject.name = "ChaoxingSignFakerLocal"
+include(":app")

@@ -1,0 +1,154 @@
+/*
+ * Copyright (c) 2025-2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
+package org.aquamarine5.brainspark.chaoxingsignfaker.components
+
+import android.util.Log
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil3.ImageLoader
+import coil3.compose.AsyncImage
+import org.aquamarine5.brainspark.chaoxingsignfaker.R
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingCourseEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.ui.theme.getLowAttentionGrayColor
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.isDevelopedMode
+
+@Composable
+fun CourseInfoColumnCard(
+    course: ChaoxingCourseEntity,
+    imageLoader: ImageLoader,
+    modifier: Modifier = Modifier,
+    mergedCount: Int = 1,
+    mergedClassIds: List<Int>? = null,
+    onPreferredResort: (Boolean) -> Unit,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(modifier)
+    ) {
+        Column {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Start,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                AsyncImage(
+                    remember(course) { course.imageUrl.replace("http://", "https://") },
+                    imageLoader = imageLoader,
+                    contentScale = ContentScale.FillHeight,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(55.dp)
+                        .clip(
+                            RoundedCornerShape(3.dp)
+                        ),
+                    onError = {
+                        Log.w("CourseInfoColumnCard", "Error loading image: ${it.result}")
+                    }
+                )
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(horizontalAlignment = Alignment.Start, modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            remember(course) { course.courseName.replace("\n", "") },
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (mergedCount > 1) {
+                            Text(
+                                "(x$mergedCount)",
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp,
+                                color = getLowAttentionGrayColor(),
+                                modifier = Modifier.padding(start = 2.dp)
+                            )
+                        }
+                    }
+                    if (!course.teacherName.isNullOrBlank()) {
+                        Text(
+                            remember(course) { course.teacherName.replace("\n", "") },
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (!course.schools.isNullOrBlank()) {
+                        Text(
+                            remember(course) { course.schools.replace("\n", "") },
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                val animTint by animateColorAsState(
+                    targetValue = if (course.isPreferred.value) {
+                        Color.Yellow
+                    } else {
+                        Color.Gray
+                    }
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Icon(
+                    painterResource(R.drawable.ic_star_fill),
+                    null,
+                    tint = animTint,
+                    modifier = Modifier.clickable {
+                        course.isPreferred.value = !course.isPreferred.value
+                        onPreferredResort(course.isPreferred.value)
+                    })
+            }
+            if (isDevelopedMode)
+                Text(
+                    remember(course, mergedClassIds) {
+                        if (mergedClassIds != null && mergedClassIds.size > 1) {
+                            "classId: [${mergedClassIds.joinToString(", ")}], courseId：${course.courseId}"
+                        } else {
+                            "classId: ${course.classId}, courseId：${course.courseId}"
+                        }
+                    },
+                    fontSize = 10.sp,
+                    lineHeight = 10.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+        }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+}

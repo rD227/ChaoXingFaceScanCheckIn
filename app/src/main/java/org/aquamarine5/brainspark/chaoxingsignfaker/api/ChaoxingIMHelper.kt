@@ -1,0 +1,412 @@
+/*
+ * Copyright (c) 2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
+package org.aquamarine5.brainspark.chaoxingsignfaker.api
+
+import android.util.Base64
+import com.alibaba.fastjson2.JSON
+import com.alibaba.fastjson2.JSONObject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
+import okhttp3.FormBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.aquamarine5.brainspark.chaoxingsignfaker.datastore.easemob.MessageBody
+import org.aquamarine5.brainspark.chaoxingsignfaker.datastore.easemob.Meta
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingEasemobIMConfig
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingEasemobIMGroup
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingGroupSignActivityEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingIMConfig
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingIMGroup
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.ChaoxingParseDataException
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.checkResponseThrowException
+import javax.crypto.Cipher
+import javax.crypto.spec.SecretKeySpec
+
+object ChaoxingIMHelper {
+    private class ChaoxingIMConfigParseException(
+        arg: String,
+        message: String? = null,
+        data: String? = null,
+        throwable: Throwable? = null
+    ) : ChaoxingParseDataException(
+        "IM配置解析异常: $arg 获取失败，${message ?: "未知错误"}",
+        throwable,
+        data = data
+    )
+
+    @Deprecated(
+        message = "The service of im.chaoxing.com is no longer available. Please use the new interface based on easecdn.com. For more information, please refer to: https://github.com/aquamarine5/ChaoxingSignFaker/issues/188",
+        replaceWith = ReplaceWith("URL_EASEMOB_IM_TOKEN")
+    )
+    val URL_IM_ME = "https://im.chaoxing.com/webim/me".toHttpUrl()
+
+    @Deprecated(message = "The service of im.chaoxing.com is no longer available. Please use the new interface based on easecdn.com. For more information, please refer to: https://github.com/aquamarine5/ChaoxingSignFaker/issues/188")
+    val URL_IM_GROUPS = "https://im.chaoxing.com/webim/message/list/getMessageList".toHttpUrl()
+
+    val URL_EASEMOB_IM_TOKEN = "https://a1-vip6.easemob.com/cx-dev/cxstudy/token".toHttpUrl()
+    const val URL_EASEMOB_IM_JOINED_GROUPS =
+        "https://a1-vip6.easemob.com/cx-dev/cxstudy/users/%s/joined_chatgroups?detail=true&version=v3&pagenum=1&pagesize=200"
+
+    const val URL_MESSAGE_ROAMING =
+        "https://a1-vip6.easecdn.com/cx-dev/cxstudy/users/%s/messageroaming"
+    const val USER_AGENT_EASEMOB = "Easemob-SDK(Android) 4.9.0.1"
+
+    val IM_ENCRYPTED_KEY = "SL2(M/eD".toByteArray(Charsets.UTF_8)
+
+    fun desDecrypt(imEncryptedPassword: String): String {
+        @Suppress("GetInstance")
+        val cipher = Cipher.getInstance("DES/ECB/PKCS5Padding")
+        val secretKey = SecretKeySpec(IM_ENCRYPTED_KEY, "DES")
+        cipher.init(Cipher.DECRYPT_MODE, secretKey)
+        return cipher.doFinal(imEncryptedPassword.hexToByteArray()).toString(Charsets.UTF_8)
+    }
+
+    suspend fun getEasemobConfig(httpClient: ChaoxingHttpClient): ChaoxingEasemobIMConfig {
+        return withContext(Dispatchers.IO) {
+            httpClient.newCall(
+                Request.Builder().url(URL_EASEMOB_IM_TOKEN)
+                    .post(
+                        JSONObject()
+                            .fluentPut("grant_type", "password")
+                            .fluentPut(
+                                "password",
+                                desDecrypt(httpClient.userEntity.imEncryptedPassword)
+                            )
+                            .fluentPut("username", httpClient.userEntity.uid)
+                            .toJSONString().toRequestBody()
+                    )
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .header("User-Agent", USER_AGENT_EASEMOB)
+                    .build()
+            ).execute().use {
+                it.checkResponseThrowException()
+                val jsonObject = JSONObject.parseObject(it.body.string())
+                return@use ChaoxingEasemobIMConfig(
+                    jsonObject.getString("access_token"),
+                    jsonObject.getJSONObject("user").getString("uuid"),
+                    jsonObject.getJSONObject("user").getString("username")
+                )
+            }
+        }
+    }
+
+    suspend fun getEasemobIMGroups(
+        httpClient: ChaoxingHttpClient,
+        imConfig: ChaoxingEasemobIMConfig
+    ): List<ChaoxingEasemobIMGroup> {
+        return withContext(Dispatchers.IO) {
+            httpClient.newCall(
+                Request.Builder()
+                    .url(URL_EASEMOB_IM_JOINED_GROUPS.format(imConfig.username))
+                    .addHeader("Authorization", "Bearer ${imConfig.accessToken}")
+                    .header("User-Agent", USER_AGENT_EASEMOB)
+                    .build()
+            ).execute().use { response ->
+                response.checkResponseThrowException()
+                val jsonObject = JSONObject.parseObject(response.body.string()).getJSONArray("data")
+                return@withContext buildList {
+                    for (index in jsonObject.indices) {
+                        runCatching {
+                            jsonObject.getJSONObject(index).run {
+                                val jsonDescription =
+                                    JSONObject.parseObject(getString("description"))
+                                ChaoxingEasemobIMGroup(
+                                    getString("name").takeUnless { it.isNullOrBlank() }
+                                        ?: jsonDescription.getJSONObject("courseInfo")
+                                            .getString("coursename"),
+                                    getString("id"),
+                                    jsonDescription.getJSONObject("courseInfo")
+                                        ?.getString("imageUrl")
+                                )
+                            }
+                        }.onSuccess {
+                            add(it)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Suppress("Deprecation")
+    @Deprecated(
+        message = "The service of im.chaoxing.com is no longer available. Please use the new interface based on easecdn.com. For more information, please refer to: https://github.com/aquamarine5/ChaoxingSignFaker/issues/188",
+        level = DeprecationLevel.ERROR
+    )
+    suspend fun getIMGroups(
+        httpClient: ChaoxingHttpClient,
+        config: ChaoxingIMConfig
+    ): List<ChaoxingIMGroup> {
+        return withContext(Dispatchers.IO) {
+            httpClient.newCall(
+                Request.Builder().url(URL_IM_GROUPS).post(
+                    FormBody.Builder()
+                        .add("tuid", config.imTuid)
+                        .add("puid", config.imPuid)
+                        .add("token", config.imToken)
+                        .build()
+                )
+                    .header("Accept", "application/json, text/javascript, */*; q=0.01")
+                    .build()
+            ).execute().use { response ->
+                response.checkResponseThrowException()
+                val responseBody = response.body.string()
+                val json = JSONObject.parseObject(responseBody)
+                val data = json.getJSONArray("data")
+                return@use data.mapNotNull { runCatching { ChaoxingIMGroup.fromJson(it as JSONObject) }.getOrNull() }
+            }
+        }
+    }
+
+
+    @Suppress("Deprecation")
+    @Deprecated(
+        message = "The service of im.chaoxing.com is no longer available. Please use the new interface based on easecdn.com. For more information, please refer to: https://github.com/aquamarine5/ChaoxingSignFaker/issues/188",
+        level = DeprecationLevel.ERROR
+    )
+    suspend fun getIMConfig(httpClient: ChaoxingHttpClient): ChaoxingIMConfig {
+        return withContext(Dispatchers.IO) {
+            httpClient.newCall(Request.Builder().url(URL_IM_ME).build()).execute().use { response ->
+                val responseBody = response.body.string()
+
+                fun extractSpan(id: String): String {
+                    runCatching {
+                        return """<span\s+id="$id"[^>]*>(.*?)</span>""".toRegex(RegexOption.DOT_MATCHES_ALL)
+                            .find(responseBody)?.groupValues?.get(1)?.trim()!!
+                    }.getOrElse {
+                        throw ChaoxingIMConfigParseException(
+                            id,
+                            it.message,
+                            throwable = it
+                        )
+                    }
+                }
+
+                val tuid = extractSpan("myTuid")
+//                val img = extractSpan("myImg")
+                val name = extractSpan("myName")
+                val token = extractSpan("myToken")
+                val puid = extractSpan("myPuid")
+                val fid = extractSpan("myFid")
+                return@use ChaoxingIMConfig("", name, token, tuid, puid, fid)
+            }
+        }
+    }
+
+    data class IMSignActivityInfo(
+        val activeId: Long,
+        val title: String,
+        val classId: Int,
+        val courseId: Long,
+        val courseName: String,
+        val startTimeTitle: String,
+        val activeTypeName: String
+    )
+
+    fun resolveImPassword(imEncryptedPassword: String): String =
+        if (imEncryptedPassword.length >= 16)
+            runCatching { desDecrypt(imEncryptedPassword) }.getOrElse { imEncryptedPassword }
+        else imEncryptedPassword
+
+    fun parseIMSignActivityInfo(attachObject: JSONObject): IMSignActivityInfo? {
+        if (attachObject.getInteger("attachmentType") != 15) return null
+        val signInfo = attachObject.getJSONObject("att_chat_course") ?: return null
+        val courseInfo = signInfo.getJSONObject("courseInfo") ?: return null
+        val activeId = signInfo.getLong("aid") ?: return null
+        if (activeId == 0L) return null
+        if (signInfo.getInteger("atype") != 2 && signInfo.getInteger("atype") != 74)
+            return null
+        return IMSignActivityInfo(
+            activeId,
+            signInfo.getString("title"),
+            courseInfo.getInteger("classid"),
+            courseInfo.getLongValue("courseid"),
+            courseInfo.getString("coursename"),
+            signInfo.getString("subTitle"),
+            signInfo.getString("atypeName")
+        )
+    }
+
+    fun buildSignActivityEntity(
+        scope: CoroutineScope,
+        activity: IMSignActivityInfo,
+        messageTimestamp: Long
+    ): ChaoxingGroupSignActivityEntity {
+        val destination =
+            scope.async(Dispatchers.IO, start = CoroutineStart.LAZY) {
+                ChaoxingSignHelper.getIMSignDestination(
+                    activity.activeTypeName,
+                    activity.activeId,
+                    activity.classId,
+                    activity.courseId
+                ) ?: throw ChaoxingIMConfigParseException(
+                    "atypeName",
+                    "未知签到类型: ${activity.activeTypeName}"
+                )
+            }
+        return ChaoxingGroupSignActivityEntity(
+            destination,
+            activity.title,
+            activity.activeId,
+            activity.classId,
+            activity.courseId,
+            activity.courseName,
+            activity.startTimeTitle,
+            activity.activeTypeName,
+            messageTimestamp
+        )
+    }
+
+    fun parseIMMessageBody(
+        scope: CoroutineScope,
+        imMessages: List<Pair<Meta, MessageBody>>
+    ): List<ChaoxingGroupSignActivityEntity> =
+        imMessages.mapNotNull { (meta, messageBody) ->
+            messageBody.extList?.firstOrNull { it.key == "attachment" }?.let { ext ->
+                runCatching {
+                    parseIMSignActivityInfo(JSONObject.parseObject(ext.stringValue))
+                }.getOrNull()?.let { activity ->
+                    buildSignActivityEntity(scope, activity, meta.field4)
+                }
+            }
+        }
+
+    suspend fun fetchIMHistoryMessages(
+        imGroup: ChaoxingEasemobIMGroup,
+        httpClient: ChaoxingHttpClient,
+        imConfig: ChaoxingEasemobIMConfig,
+        scope: CoroutineScope
+    ): List<ChaoxingGroupSignActivityEntity> {
+        return withContext(Dispatchers.IO) {
+            httpClient.newCall(
+                Request.Builder().post(
+                    JSONObject()
+                        .fluentPut("end", "-1")
+                        .fluentPut(
+                            "queue", "${imGroup.id}@conference.easemob.com"
+                        )
+                        .fluentPut("start", "-1").toString()
+                        .toRequestBody("text/plain;charset=UTF-8".toMediaType())
+                )
+                    .addHeader("Authorization", "Bearer ${imConfig.accessToken}")
+                    .header("User-Agent", USER_AGENT_EASEMOB)
+                    .url(URL_MESSAGE_ROAMING.format(imConfig.username))
+                    .build()
+            ).execute().use { response ->
+                response.checkResponseThrowException()
+                val responseBody = response.body.string()
+                val json = JSON.parseObject(responseBody)
+                val data = json.getJSONObject("data")
+                val messages = data.getJSONArray("msgs")
+                val resultList = mutableListOf<Pair<Meta, MessageBody>>()
+                for (i in messages.indices) {
+                    val msgObj = messages.getJSONObject(i)
+                    val msgStr = msgObj.getString("msg")
+                    val msgBytes = Base64.decode(msgStr, Base64.DEFAULT)
+                    val meta = Meta.parseFrom(msgBytes)
+                    val messageBody = MessageBody.parseFrom(meta.field6)
+                    resultList.add(meta to messageBody)
+                }
+                return@use parseIMMessageBody(scope, resultList).distinctBy { it.activeId }
+            }
+        }
+    }
+
+    private val START_TIME_TITLE_PATTERN =
+        """(?:(\d{2,4})-)?(\d{1,2})-(\d{1,2}) (\d{1,2}):(\d{1,2})""".toRegex()
+
+    private fun startTimeTitleSortKey(title: String): List<Int>? {
+        val groups = START_TIME_TITLE_PATTERN.find(title)?.groupValues ?: return null
+        val year = groups[1].toIntOrNull() ?: Int.MIN_VALUE
+        val rest = groups.drop(2).map { it.toIntOrNull() ?: return null }
+        if (rest.size != 4) return null
+        return listOf(year) + rest
+    }
+
+    suspend fun fetchIMHistoryMessages(
+        imGroups: List<ChaoxingEasemobIMGroup>,
+        httpClient: ChaoxingHttpClient,
+        imConfig: ChaoxingEasemobIMConfig,
+        scope: CoroutineScope
+    ): List<ChaoxingGroupSignActivityEntity> {
+        return coroutineScope {
+            imGroups.map { group ->
+                async {
+                    fetchIMHistoryMessages(group, httpClient, imConfig, scope)
+                }
+            }.awaitAll()
+        }.flatten()
+            .distinctBy { it.activeId }
+            .sortedWith(
+                compareBy(
+                    { startTimeTitleSortKey(it.startTimeTitle) == null },
+                    { startTimeTitleSortKey(it.startTimeTitle)?.getOrNull(0) },
+                    { startTimeTitleSortKey(it.startTimeTitle)?.getOrNull(1) },
+                    { startTimeTitleSortKey(it.startTimeTitle)?.getOrNull(2) },
+                    { startTimeTitleSortKey(it.startTimeTitle)?.getOrNull(3) },
+                    { startTimeTitleSortKey(it.startTimeTitle)?.getOrNull(4) },
+                    { it.startTimeTitle }
+                )
+            )
+    }
+
+    @Suppress("Deprecation")
+    @Deprecated(
+        message = "The service of im.chaoxing.com is no longer available. Please use the new interface based on easecdn.com. For more information, please refer to: https://github.com/aquamarine5/ChaoxingSignFaker/issues/188",
+        level = DeprecationLevel.ERROR
+    )
+    suspend fun fetchIMHistoryMessages(
+        imGroup: ChaoxingIMGroup,
+        httpClient: ChaoxingHttpClient,
+        imConfig: ChaoxingIMConfig,
+        scope: CoroutineScope
+    ): List<ChaoxingGroupSignActivityEntity> {
+        return withContext(Dispatchers.IO) {
+            httpClient.newCall(
+                Request.Builder().post(
+                    JSONObject()
+                        .fluentPut("end", "-1")
+                        .fluentPut(
+                            "queue", if (imGroup.isGroup) {
+                                "${imGroup.chatId}@conference.easemob.com"
+                            } else {
+                                "${imGroup.chatId}@easemob.com"
+                            }
+                        )
+                        .fluentPut("start", "-1").toString()
+                        .toRequestBody("text/plain;charset=UTF-8".toMediaType())
+                )
+                    .addHeader("Authorization", "Bearer ${imConfig.imToken}")
+                    .url(URL_MESSAGE_ROAMING.format(imConfig.imTuid))
+                    .build()
+            ).execute().use { response ->
+                response.checkResponseThrowException()
+                val responseBody = response.body.string()
+                val json = JSON.parseObject(responseBody)
+                val data = json.getJSONObject("data")
+                val messages = data.getJSONArray("msgs")
+                val resultList = mutableListOf<Pair<Meta, MessageBody>>()
+                for (i in messages.indices) {
+                    val msgObj = messages.getJSONObject(i)
+                    val msgStr = msgObj.getString("msg")
+                    val msgBytes = Base64.decode(msgStr, Base64.DEFAULT)
+                    val meta = Meta.parseFrom(msgBytes)
+                    val messageBody = MessageBody.parseFrom(meta.field6)
+                    resultList.add(meta to messageBody)
+                }
+                return@use parseIMMessageBody(scope, resultList)
+            }
+        }
+    }
+}

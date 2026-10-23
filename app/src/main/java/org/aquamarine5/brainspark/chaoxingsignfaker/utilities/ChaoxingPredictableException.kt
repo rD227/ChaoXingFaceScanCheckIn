@@ -1,0 +1,44 @@
+/*
+ * Copyright (c) 2025-2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
+package org.aquamarine5.brainspark.chaoxingsignfaker.utilities
+
+open class ChaoxingPredictableException(
+    override val message: String?,
+    throwable: Throwable? = null
+) : Throwable(message, throwable) {
+    class ApplicationIllegalChannelException(cause: Throwable? = null) :
+        Exception("Illegal channel detected. Please check your app version and channel.", cause)
+}
+
+open class ChaoxingParseDataException(
+    message: String? = null,
+    throwable: Throwable? = null,
+    val data: String? = null
+) : ChaoxingPredictableException(message, throwable)
+
+fun Throwable.getPredictableMessage(): String {
+    return if (this is ChaoxingPredictableException) {
+        this.message ?: this.toString()
+    } else {
+        "预期外错误: ${this::class.java.name}: ${this.localizedMessage ?: this.toString()}"
+    }
+}
+
+class ChaoxingFaceSignException(message: String, throwable: Throwable? = null) :
+    ChaoxingParseDataException("人脸验证失败: $message", throwable)
+
+class ChaoxingFaceImageException(message: String, throwable: Throwable? = null) :
+    ChaoxingPredictableException(message, throwable)
+
+class ChaoxingCaptchaCancelledException(throwable: Throwable? = null) :
+    ChaoxingPredictableException("已取消验证码验证", throwable)
+
+class ChaoxingUserSessionOutdatedException(
+    message: String = "登录状态已过期，请重新登录",
+    throwable: Throwable? = null,
+    data: String? = null
+) : ChaoxingParseDataException(message, throwable, data)

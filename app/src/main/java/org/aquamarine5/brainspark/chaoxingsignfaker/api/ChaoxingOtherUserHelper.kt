@@ -1,0 +1,409 @@
+/*
+ * Copyright (c) 2025-2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
+package org.aquamarine5.brainspark.chaoxingsignfaker.api
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.set
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
+import okhttp3.OkHttpClient
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.chaoxingUserAgent
+import org.aquamarine5.brainspark.chaoxingsignfaker.datastore.ChaoxingOtherUserSession
+import org.aquamarine5.brainspark.chaoxingsignfaker.datastore.ChaoxingSignFakerDataStore
+import org.aquamarine5.brainspark.chaoxingsignfaker.datastore.HttpCookie
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingImportOtherUserResultStatus
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingOtherUserSharedEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ImportOtherUserResult
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.ChaoxingParseDataException
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.chaoxingDataStore
+
+object ChaoxingOtherUserHelper {
+    class NotAvailableQRCodeException(message: String, throwable: Throwable? = null) :
+        ChaoxingParseDataException(message, throwable)
+
+    class AlreadyExistedOtherUserException(message: String, throwable: Throwable? = null) :
+        ChaoxingParseDataException(message, throwable)
+
+    private suspend fun ChaoxingOtherUserSession.applySharedDeviceCode(
+        context: Context,
+        deviceCode: String?
+    ): ChaoxingOtherUserSession {
+        if (deviceCode.isNullOrEmpty()) return this
+        if (deviceCode == this.deviceCode && isNotRandomizedDeviceCode) return this
+        val updatedSession = toBuilder()
+            .setDeviceCode(deviceCode)
+            .setIsNotRandomizedDeviceCode(true)
+            .build()
+        context.chaoxingDataStore.updateData { datastore ->
+            datastore.toBuilder().apply {
+                otherUsersList.indexOfFirst { it.phoneNumber == updatedSession.phoneNumber }
+                    .takeIf { it >= 0 }?.let { index -> setOtherUsers(index, updatedSession) }
+            }.build()
+        }
+        return updatedSession
+    }
+
+    private fun getQRCodeSize(context: Context): Int {
+        val displayMetrics = context.resources.displayMetrics
+        val width = displayMetrics.widthPixels
+        val height = displayMetrics.heightPixels
+        val shorterSide = minOf(width, height)
+        return (shorterSide * 0.73).toInt()
+    }
+
+    fun getQRCodeDpSize(context: Context): Dp {
+        return (getQRCodeSize(context) / context.resources.displayMetrics.density).toInt().dp
+    }
+
+    fun checkSharedEntity(dataStore: ChaoxingSignFakerDataStore) =
+        !dataStore.loginSession.password.isNullOrEmpty() && !dataStore.loginSession.phoneNumber.isNullOrEmpty()
+
+    private fun getSharedUserEntity(dataStore: ChaoxingSignFakerDataStore): ChaoxingOtherUserSharedEntity {
+        return ChaoxingOtherUserSharedEntity(
+            dataStore.loginSession.phoneNumber!!,
+            dataStore.loginSession.password!!,
+            ChaoxingHttpClient.instance!!.name
+        )
+    }
+
+    suspend fun getSharedUrl(
+        context: Context,
+        insertSharedEntity: ChaoxingOtherUserSharedEntity? = null,
+        selectedFaceObjectIds: List<String>,
+    ): String =
+        withContext(Dispatchers.IO) {
+            val dataStore = context.chaoxingDataStore.data.first()
+            val sharedEntity = insertSharedEntity ?: getSharedUserEntity(dataStore)
+            val availableFaceObjectIds =
+                dataStore.faceRecognitionConfiguresMap[sharedEntity.phoneNumber]
+                    ?.imagesList
+                    .orEmpty()
+                    .map { it.objectId }
+            val faceObjectIds = selectedFaceObjectIds
+                .distinct()
+                .filter { it in availableFaceObjectIds }.take(ChaoxingFaceHelper.MAX_FACE_IMAGES)
+            val deviceCode = ChaoxingDeviceInfoHelper.getCachedLocalMachineDeviceCode(context)
+            "facescan-clean://import?phone=${sharedEntity.phoneNumber}&pwd=${
+                Uri.encode(sharedEntity.encryptedPassword)
+            }&name=${
+                Uri.encode(sharedEntity.userName)
+            }&face=${faceObjectIds.joinToString(",")}&dc=${Uri.encode(deviceCode)}"
+        }
+
+    suspend fun generateQRCode(
+        context: Context,
+        insertSharedEntity: ChaoxingOtherUserSharedEntity? = null,
+        selectedFaceObjectIds: List<String>,
+    ): Bitmap = withContext(Dispatchers.Default) {
+        val qrcodeSize = getQRCodeSize(context)
+        val qrCode = QRCodeWriter().encode(
+            getSharedUrl(context, insertSharedEntity, selectedFaceObjectIds),
+            BarcodeFormat.QR_CODE,
+            qrcodeSize,
+            qrcodeSize,
+            mapOf(
+                EncodeHintType.CHARACTER_SET to "utf-8",
+                EncodeHintType.MARGIN to 1,
+                EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M
+            )
+        )
+        return@withContext createBitmap(qrcodeSize, qrcodeSize, Bitmap.Config.RGB_565)
+            .apply {
+                for (x in 0 until qrcodeSize) {
+                    for (y in 0 until qrcodeSize) {
+                        set(x, y, (if (qrCode[x, y]) 0x000000 else 0xFFFFFF))
+                    }
+                }
+            }
+    }
+
+    suspend fun repairOtherUserSession(
+        context: Context,
+        session: ChaoxingOtherUserSession,
+        password: String
+    ): ChaoxingOtherUserSession =
+        withContext(Dispatchers.IO) {
+            val tempOkHttpClient =
+                (ChaoxingHttpClient.instance?.okHttpClient ?: OkHttpClient()).newBuilder()
+                    .cookieJar(object : CookieJar {
+                        private val cookieStore: MutableMap<String, List<Cookie>> = mutableMapOf()
+                        private var chaoxingCookieSession: List<Cookie> = listOf()
+
+                        override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+                            if (url.host.endsWith("chaoxing.com") && url.encodedPath == "/fanyalogin") {
+                                chaoxingCookieSession = cookies
+                            } else
+                                cookieStore[url.host] = cookies
+                        }
+
+                        override fun loadForRequest(url: HttpUrl): List<Cookie> {
+                            return if (url.host.endsWith("chaoxing.com")) {
+                                chaoxingCookieSession
+                            } else {
+                                cookieStore[url.host] ?: listOf()
+                            }
+                        }
+                    }).addInterceptor { chain ->
+                        chain.proceed(
+                            chain.request().newBuilder()
+                                .header("User-Agent", chaoxingUserAgent).build()
+                        )
+                    }.retryOnConnectionFailure(true).build()
+
+            ChaoxingHttpClient.login(
+                tempOkHttpClient,
+                session.phoneNumber,
+                password,
+                context,
+                isSaveToDataStore = false,
+                isEncryptedPassword = false
+            )
+            val newSession = session.toBuilder()
+                .setPassword(password.replace(" ", "+"))
+                .setIsObsoleteSession(false)
+                .clearCookies().addAllCookies(
+                    tempOkHttpClient.cookieJar.loadForRequest(
+                        HttpUrl.Builder()
+                            .scheme("https")
+                            .host("chaoxing.com").build()
+                    ).map { cookie ->
+                        HttpCookie.newBuilder()
+                            .setValue(cookie.value)
+                            .setName(cookie.name)
+                            .setHost(cookie.domain).build()
+                    }
+                ).build()
+            context.chaoxingDataStore.updateData { datastore ->
+                val index =
+                    datastore.otherUsersList.indexOfFirst { it.phoneNumber == session.phoneNumber }
+                if (index == -1) return@updateData datastore
+                datastore.toBuilder().removeOtherUsers(index).addOtherUsers(index, newSession)
+                    .build()
+            }
+            return@withContext newSession
+        }
+
+    suspend fun saveOtherUser(
+        context: Context,
+        sharedEntity: ChaoxingOtherUserSharedEntity
+    ): ImportOtherUserResult =
+        withContext(Dispatchers.IO) {
+            val dataStore = context.chaoxingDataStore.data.first()
+            if (dataStore.loginSession.phoneNumber == sharedEntity.phoneNumber)
+                throw AlreadyExistedOtherUserException("自己不能添加自己！")
+            val existedSession = dataStore.otherUsersList
+                .firstOrNull { it.phoneNumber == sharedEntity.phoneNumber }
+                ?.applySharedDeviceCode(context, sharedEntity.deviceCode)
+
+            suspend fun saveFaceImages(okHttpClient: OkHttpClient, phoneNumber: String) {
+                if (sharedEntity.faceObjectIds.isEmpty()) return
+                val configure = context.chaoxingDataStore.data.first()
+                    .faceRecognitionConfiguresMap[sharedEntity.phoneNumber]
+                val existingObjectIds = configure?.imagesList.orEmpty().mapTo(mutableSetOf()) {
+                    it.objectId
+                }
+                val availableNewImageCount =
+                    (ChaoxingFaceHelper.MAX_FACE_IMAGES - (configure?.imagesCount ?: 0))
+                        .coerceAtLeast(0)
+                var newImageCount = 0
+
+                sharedEntity.faceObjectIds
+                    .asSequence()
+                    .filter { it.isNotBlank() }
+                    .distinct()
+                    .filter { objectId ->
+                        val imageFile = ChaoxingFaceHelper.getFaceImageFile(context, objectId)
+                        val hasUsableLocalImage =
+                            objectId in existingObjectIds && imageFile.isFile && imageFile.length() > 0L
+                        when {
+                            hasUsableLocalImage -> false
+                            objectId in existingObjectIds -> true
+                            newImageCount < availableNewImageCount -> {
+                                newImageCount++
+                                true
+                            }
+
+                            else -> false
+                        }
+                    }
+                    .forEach { objectId ->
+                        ChaoxingFaceHelper.saveFaceImage(
+                            okHttpClient,
+                            phoneNumber,
+                            context,
+                            objectId,
+                        )
+                    }
+            }
+
+            if (existedSession != null && existedSession.password == sharedEntity.encryptedPassword.replace(
+                    " ",
+                    "+"
+                )
+            ) {
+                if (sharedEntity.faceObjectIds.isEmpty())
+                    throw AlreadyExistedOtherUserException(
+                        "${sharedEntity.userName}(${sharedEntity.phoneNumber}) 用户已经存在！"
+                    )
+                if (sharedEntity.faceObjectIds.all { localObjectId ->
+                        val existsInDataStore =
+                            dataStore.faceRecognitionConfiguresMap[sharedEntity.phoneNumber]
+                                ?.imagesList
+                                ?.any { it.objectId == localObjectId }
+                                ?: false
+                        val imageFile = ChaoxingFaceHelper.getFaceImageFile(context, localObjectId)
+                        existsInDataStore && imageFile.isFile && imageFile.length() > 0L
+                    }) {
+                    throw AlreadyExistedOtherUserException(
+                        "${sharedEntity.userName}(${sharedEntity.phoneNumber}) 用户已经存在！"
+                    )
+                }
+                val faceClient =
+                    ChaoxingHttpRequesterPool.getRequester(context, existedSession.phoneNumber)
+                saveFaceImages(faceClient.okHttpClient, existedSession.phoneNumber)
+                return@withContext Triple(
+                    ChaoxingImportOtherUserResultStatus.EXISTED_BUT_UPDATE_FACE_IMAGES,
+                    existedSession.name,
+                    existedSession,
+                )
+            }
+
+            val tempOkHttpClient =
+                (ChaoxingHttpClient.instance?.okHttpClient ?: OkHttpClient()).newBuilder()
+                    .cookieJar(object : CookieJar {
+                        private val cookieStore: MutableMap<String, List<Cookie>> = mutableMapOf()
+                        private var chaoxingCookieSession: List<Cookie> = listOf()
+
+                        override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+                            if (url.host.endsWith("chaoxing.com") && url.encodedPath == "/fanyalogin") {
+                                chaoxingCookieSession = cookies
+                            } else
+                                cookieStore[url.host] = cookies
+                        }
+
+                        override fun loadForRequest(url: HttpUrl): List<Cookie> {
+                            return if (url.host.endsWith("chaoxing.com")) {
+                                chaoxingCookieSession
+                            } else {
+                                cookieStore[url.host] ?: listOf()
+                            }
+                        }
+                    }).addInterceptor { chain ->
+                        chain.proceed(
+                            chain.request().newBuilder()
+                                .header("User-Agent", chaoxingUserAgent).build()
+                        )
+                    }.retryOnConnectionFailure(true).build()
+
+            ChaoxingHttpClient.login(
+                tempOkHttpClient,
+                sharedEntity.phoneNumber,
+                sharedEntity.encryptedPassword,
+                context,
+                isSaveToDataStore = false,
+                isEncryptedPassword = true
+            )
+            val (userEntity, puid) =
+                ChaoxingHttpClient.getInfoWithIdentity(
+                    tempOkHttpClient,
+                    context,
+                    sharedEntity.phoneNumber
+                )
+
+            val session = (existedSession?.toBuilder() ?: ChaoxingOtherUserSession.newBuilder())
+                .setPassword(sharedEntity.encryptedPassword.replace(" ", "+"))
+                .setName(sharedEntity.userName.ifEmpty { userEntity.name })
+                .setPuid(puid)
+                .setPhoneNumber(sharedEntity.phoneNumber)
+                .apply {
+                    sharedEntity.deviceCode?.takeIf { it.isNotEmpty() }?.let { deviceCode ->
+                        setDeviceCode(deviceCode)
+                        setIsNotRandomizedDeviceCode(true)
+                    }
+                }
+                .clearCookies()
+                .addAllCookies(
+                    tempOkHttpClient.cookieJar.loadForRequest(
+                        HttpUrl.Builder()
+                            .scheme("https")
+                            .host("chaoxing.com").build()
+                    ).map { cookie ->
+                        HttpCookie.newBuilder()
+                            .setValue(cookie.value)
+                            .setName(cookie.name)
+                            .setHost(cookie.domain).build()
+                    })
+                .build()
+
+            if (existedSession == null) {
+                context.chaoxingDataStore.updateData { datastore ->
+                    datastore.toBuilder().addOtherUsers(session).build()
+                }
+                saveFaceImages(tempOkHttpClient, sharedEntity.phoneNumber)
+                return@withContext Triple(
+                    ChaoxingImportOtherUserResultStatus.SUCCESS,
+                    session.name,
+                    session,
+                )
+            }
+
+            context.chaoxingDataStore.updateData { datastore ->
+                val index =
+                    datastore.otherUsersList.indexOfFirst { it.phoneNumber == session.phoneNumber }
+                if (index == -1) return@updateData datastore
+                datastore.toBuilder().removeOtherUsers(index).addOtherUsers(index, session).build()
+            }
+            saveFaceImages(tempOkHttpClient, sharedEntity.phoneNumber)
+            return@withContext Triple(
+                ChaoxingImportOtherUserResultStatus.EXISTED_BUT_UPDATE_PASSWORD,
+                session.name,
+                session,
+            )
+        }
+
+    suspend fun markSessionObsoleted(session: ChaoxingOtherUserSession, context: Context) =
+        withContext(Dispatchers.IO) {
+            context.chaoxingDataStore.updateData { datastore ->
+                val updatedSessions = datastore.otherUsersList.map {
+                    if (it.phoneNumber == session.phoneNumber) it.toBuilder()
+                        .setIsObsoleteSession(true).build() else it
+                }
+                datastore.toBuilder().clearOtherUsers().addAllOtherUsers(updatedSessions).build()
+            }
+        }
+
+    suspend fun ChaoxingOtherUserSession.getSessionPuid(context: Context): Int? {
+        return if (this.hasPuid()) this.puid else this.cookiesList.firstOrNull { it.name == "_uid" }?.value?.toIntOrNull()
+            ?.also {
+                context.chaoxingDataStore.updateData { datastore ->
+                    val index =
+                        datastore.otherUsersList.indexOfFirst { it.phoneNumber == this@getSessionPuid.phoneNumber }
+                    if (index != -1) {
+                        datastore.toBuilder().removeOtherUsers(index).addOtherUsers(
+                            index,
+                            this@getSessionPuid.toBuilder().setPuid(it).build()
+                        ).build()
+                    } else {
+                        datastore
+                    }
+                }
+            }
+    }
+}

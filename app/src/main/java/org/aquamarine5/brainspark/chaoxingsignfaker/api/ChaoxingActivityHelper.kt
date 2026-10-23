@@ -1,0 +1,194 @@
+/*
+ * Copyright (c) 2025-2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
+package org.aquamarine5.brainspark.chaoxingsignfaker.api
+
+import com.alibaba.fastjson2.JSONObject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Request
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingCourseActivitiesEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingCourseEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingSignActivityEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.RecommendActivityEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.ChaoxingParseDataException
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.checkResponseThrowException
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.requirePredictable
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.reportLocalError
+import kotlin.time.Duration.Companion.minutes
+
+object ChaoxingActivityHelper {
+    enum class SignRedirectStatus {
+        COMMON,
+        SIGN_IN_AND_SIGN_OUT_PUBLISHED,
+        SIGN_OUT,
+        SIGN_IN_BUT_SIGN_OUT_UNPUBLISHED
+    }
+
+    private val URL_ACTIVITY_LOAD =
+        "https://mobilelearn.chaoxing.com/v2/apis/active/student/activelist?fid=0&showNotStartedActive=0".toHttpUrl()
+
+    const val NO_SIGN_OFF_EVENT = 4999L
+
+    val AVAILABLE_INTERVAL = 20.minutes.inWholeMilliseconds
+
+    suspend fun checkCourseHaveAvailableActivity(
+        client: ChaoxingHttpRequester,
+        classId: Int,
+        courseId: Long
+    ): RecommendActivityEntity? = withContext(Dispatchers.IO) {
+        client.newCall(
+            Request.Builder().get().url(
+                URL_ACTIVITY_LOAD.newBuilder()
+                    .addQueryParameter("courseId", courseId.toString())
+                    .addQueryParameter("classId", classId.toString())
+                    .build()
+            ).build()
+        ).execute().use {
+            it.checkResponseThrowException()
+            val jsonResult = JSONObject.parseObject(it.body.string()).getJSONObject("data")
+            (jsonResult?.getJSONArray("activeList") ?: return@withContext null).asSequence()
+                .map { activity ->
+                    activity as JSONObject
+                }.firstOrNull { activity ->
+                    (activity.getInteger("type") == 2 || activity.getInteger("type") == 74) &&
+                            activity.getInteger("status") == 1 &&
+                            activity.getLong("startTime") + AVAILABLE_INTERVAL > System.currentTimeMillis()
+                }?.let { activity ->
+                    RecommendActivityEntity(
+                        CoroutineScope(Dispatchers.IO).async(
+                            start = CoroutineStart.LAZY
+                        ) {
+                            ChaoxingSignHelper.getRedirectDestination(
+                                activity.getLong("id"),
+                                classId,
+                                courseId
+                            )
+                        },
+                        activity.getLong("startTime"),
+                        ChaoxingCourseHelper.queryClassName(client, classId),
+                        classId,
+                        courseId,
+                        activity.getString("nameOne")
+                    )
+                }
+        }
+    }
+
+    suspend fun getActivitiesEntity(
+        client: ChaoxingHttpRequester,
+        courses: List<ChaoxingCourseEntity>,
+        onPartialFailure: (Int) -> Unit = {}
+    ): ChaoxingCourseActivitiesEntity {
+        requirePredictable(courses.isNotEmpty()) { "Courses should not be empty." }
+        val results = coroutineScope {
+            courses.map { course ->
+                async {
+                    runCatching {
+                        getActivitiesEntity(client, course)
+                    }.onFailure {
+                        if (it is CancellationException) throw it
+                    }
+                }
+            }.awaitAll()
+        }
+        val failures = results.filter { it.isFailure }
+        if (failures.size == results.size) {
+            failures.first().getOrThrow()
+        }
+        failures.forEach { it.exceptionOrNull()?.reportLocalError() }
+        if (failures.isNotEmpty()) {
+            onPartialFailure(failures.size)
+        }
+        val entities = results.mapNotNull { it.getOrNull() }
+        val representative = courses.first()
+        val mergedActivities = entities.flatMap { it.signActivities }
+            .distinctBy { it.id }
+            .sortedByDescending { it.startTime }
+        return ChaoxingCourseActivitiesEntity(
+            entities.first().ext,
+            representative,
+            mergedActivities
+        )
+    }
+
+    suspend fun getActivitiesEntity(
+        client: ChaoxingHttpRequester,
+        course: ChaoxingCourseEntity
+    ): ChaoxingCourseActivitiesEntity =
+        withContext(Dispatchers.IO) {
+            client.newCall(
+                Request.Builder().get().url(
+                    URL_ACTIVITY_LOAD.newBuilder()
+                        .addQueryParameter("courseId", course.courseId.toString())
+                        .addQueryParameter("classId", course.classId.toString())
+                        .build()
+                ).build()
+            ).execute().use { response ->
+                response.checkResponseThrowException()
+                val responseBody = response.body.string()
+                val jsonResult = JSONObject.parseObject(responseBody)?.getJSONObject("data")
+                    ?: throw ChaoxingParseDataException(
+                        "解析课程数据失败",
+                        data = responseBody
+                    )
+                val activeList = jsonResult.getJSONArray("activeList")?.map { activity ->
+                    activity as JSONObject
+                }?.filter { activity ->
+                    activity.getInteger("type") == 2 || activity.getInteger("type") == 74
+                } ?: throw ChaoxingParseDataException(
+                    "解析课程数据失败",
+                    data = jsonResult.toJSONString()
+                )
+                val signActivities = List(activeList.size) { i ->
+                    val activity = activeList[i]
+                    runCatching {
+                        ChaoxingSignActivityEntity(
+                            activity.getLong("startTime"),
+                            activity.getLong("endTime"),
+                            activity.getInteger("userStatus"),
+                            activity.getString("otherId"),
+                            activity.getInteger("isLook") == 1,
+                            activity.getInteger("type"),
+                            activity.getInteger("activeType"),
+                            activity.getString("nameOne"),
+                            activity.getLong("id"),
+                            activity.getInteger("status"),
+                            activity.getString("nameFour"),
+                            course,
+                            jsonResult.getJSONObject("ext").toString()
+                        )
+                    }.getOrElse {
+                        throw ChaoxingParseDataException(
+                            "解析课程活动数据失败：${it.message}",
+                            it,
+                            activity.toJSONString()
+                        )
+                    }
+                }
+                runCatching {
+                    ChaoxingCourseActivitiesEntity(
+                        jsonResult.getJSONObject("ext").toString(),
+                        course,
+                        signActivities
+                    )
+                }.getOrElse {
+                    throw ChaoxingParseDataException(
+                        "解析课程活动数据失败: ${it.message}",
+                        it,
+                        jsonResult.toJSONString()
+                    )
+                }
+            }
+        }
+}

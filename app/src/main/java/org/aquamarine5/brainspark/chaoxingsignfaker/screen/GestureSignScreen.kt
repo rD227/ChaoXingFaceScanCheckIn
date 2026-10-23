@@ -1,0 +1,667 @@
+/*
+ * Copyright (c) 2025-2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
+package org.aquamarine5.brainspark.chaoxingsignfaker.screen
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
+import com.github.ihsg.patternlocker.DefaultLockerNormalCellView
+import com.github.ihsg.patternlocker.OnPatternChangeListener
+import com.github.ihsg.patternlocker.PatternLockerView
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.Serializable
+import org.aquamarine5.brainspark.chaoxingsignfaker.R
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingCourseHelper
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingHttpClient
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingHttpRequesterPool
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingSignHelper
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.CaptchaHandlerDialog
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.CaptchaHandlerParams
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.CenterCircularProgressIndicator
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.GetLocationComponent
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.NetworkExceptionComponent
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.NotReadyToSignNoticeComponent
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.OtherUserSelectorComponent
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.SignOutRedirectTips
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.SignPotentialWarningTips
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.cloneSessionGuard
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.toChaoxingLocationSignEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingLocationSignEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingSignActivityEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingSignActivityStatus
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingSignOutEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingSignResult
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingSignStatus
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.SignDestination
+import org.aquamarine5.brainspark.chaoxingsignfaker.signer.ChaoxingGestureSigner
+import org.aquamarine5.brainspark.chaoxingsignfaker.signer.ChaoxingSignHandler
+import org.aquamarine5.brainspark.chaoxingsignfaker.signer.ChaoxingSigner
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.LocalSnackbarHostState
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.chaoxingDataStore
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.displaySnackbar
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.saveSelectedLocation
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.snackbarReport
+import kotlin.time.Duration.Companion.milliseconds
+
+
+@Serializable
+data class GestureSignDestination(
+    override val activeId: Long,
+    override val classId: Int,
+    override val courseId: Long,
+    val extContent: String,
+    val startTime: Long?,
+    override val endTime: Long?,
+    val isLate: Boolean,
+    override val isCloneSession: Boolean
+) : SignDestination {
+    companion object {
+        fun parseFromSignActivityEntity(
+            activityEntity: ChaoxingSignActivityEntity,
+            isLate: Boolean,
+            isCloneSession: Boolean
+        ): GestureSignDestination {
+            return GestureSignDestination(
+                activityEntity.id,
+                activityEntity.course.classId,
+                activityEntity.course.courseId,
+                activityEntity.ext,
+                activityEntity.startTime,
+                activityEntity.endTime,
+                isLate,
+                isCloneSession
+            )
+        }
+    }
+}
+
+
+@Composable
+fun GestureSignScreen(
+    destination: GestureSignDestination,
+    navToCourseDetailDestination: () -> Unit,
+    navToOtherSign: (SignDestination) -> Unit,
+    navToOtherUserDestination: () -> Unit
+) {
+    if (!cloneSessionGuard(
+            destination.isCloneSession,
+            onCloneInvalid = navToCourseDetailDestination
+        )
+    ) return
+    var signActivityStatus by remember { mutableStateOf<ChaoxingSignActivityStatus?>(null) }
+    var isSignForOther by remember { mutableStateOf(false) }
+    val signer = remember {
+        ChaoxingGestureSigner(
+            ChaoxingHttpClient.instance!!,
+            destination
+        )
+    }
+    var captchaValidateParams by remember {
+        mutableStateOf<CaptchaHandlerParams<ChaoxingGestureSigner>>(
+            null
+        )
+    }
+    if (captchaValidateParams != null) {
+        CaptchaHandlerDialog(
+            captchaValidateParams!!.first,
+            captchaValidateParams!!.second,
+            onDismiss = {
+                captchaValidateParams = null
+            })
+    }
+    var signoffData by remember { mutableStateOf<ChaoxingSignOutEntity?>(null) }
+    var isMapRequired by remember { mutableStateOf(false) }
+    val snackbarHost = LocalSnackbarHostState.current
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isFetchedFailure by remember { mutableStateOf<Result<*>?>(null) }
+    val hapticFeedback = LocalHapticFeedback.current
+    LaunchedEffect(Unit) {
+        isFetchedFailure = runCatching {
+            signoffData = if (destination.isCloneSession) {
+                ChaoxingHttpClient.cloneInstance!!.let { client ->
+                    ChaoxingGestureSigner(
+                        client,
+                        destination
+                    ).let {
+                        signActivityStatus = it.preSign(context)
+                        isMapRequired = it.isPositionRequired()
+                        it.getGestureSignInfo()
+                    }
+                }
+            } else {
+                signActivityStatus = signer.preSign(context)
+                isMapRequired = signer.isPositionRequired()
+                signer.getGestureSignInfo()
+            }
+        }.onFailure {
+            it.snackbarReport(
+                snackbarHost,
+                coroutineScope,
+                "获取签到信息失败",
+                hapticFeedback
+            )
+        }
+    }
+
+    Crossfade(isFetchedFailure) { v ->
+        if (v == null) {
+            CenterCircularProgressIndicator()
+        } else if (v.isFailure) {
+            NetworkExceptionComponent(v.exceptionOrNull()!!) {
+                coroutineScope.launch {
+                    isFetchedFailure = runCatching {
+                        signoffData = if (destination.isCloneSession) {
+                            ChaoxingHttpClient.cloneInstance!!.let { client ->
+                                ChaoxingGestureSigner(
+                                    client,
+                                    destination
+                                ).let {
+                                    signActivityStatus = it.preSign(context)
+                                    isMapRequired = it.isPositionRequired()
+                                    it.getGestureSignInfo()
+                                }
+                            }
+                        } else {
+                            signActivityStatus = signer.preSign(context)
+                            isMapRequired = signer.isPositionRequired()
+                            signer.getGestureSignInfo()
+                        }
+                    }.onFailure {
+                        it.snackbarReport(
+                            snackbarHost,
+                            coroutineScope,
+                            "获取签到信息失败",
+                            hapticFeedback
+                        )
+                    }
+                }
+                isFetchedFailure = null
+            }
+        } else {
+            Crossfade(signActivityStatus, animationSpec = tween(700)) { c ->
+                if (c != null && c != ChaoxingSignActivityStatus.READY_TO_SIGN) {
+                    Box(modifier = Modifier.padding(8.dp, 0.dp, 8.dp, 8.dp)) {
+                        NotReadyToSignNoticeComponent(
+                            onSignForOtherUser = {
+                                signActivityStatus = ChaoxingSignActivityStatus.READY_TO_SIGN
+                                isSignForOther = true
+                            }, onDismiss = {
+                                signActivityStatus = ChaoxingSignActivityStatus.READY_TO_SIGN
+                            }, isExpiredSign = c == ChaoxingSignActivityStatus.EXPIRED
+                        ) { navToCourseDetailDestination() }
+
+                        if (destination.startTime != null)
+                            SignPotentialWarningTips(
+                                destination.startTime,
+                                destination.endTime,
+                                destination.isLate,
+                                isPadding = true
+                            )
+                    }
+                } else if (c == ChaoxingSignActivityStatus.READY_TO_SIGN) {
+                    var isCheckingStatus by remember { mutableStateOf(false) }
+                    var text by remember { mutableStateOf("") }
+                    var locationData by remember { mutableStateOf<ChaoxingLocationSignEntity?>(null) }
+                    LaunchedEffect(Unit) {
+                        context.chaoxingDataStore.data.first().let { data ->
+                            if (data.containsClassSelectedLocation(destination.classId)) {
+                                locationData = data.getClassSelectedLocationOrThrow(
+                                    destination.classId
+                                ).toChaoxingLocationSignEntity()
+                            }
+                        }
+                    }
+                    var isMapGetting by remember { mutableStateOf(false) }
+                    var pendingAutoSignAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+                    val signStatus = remember { mutableListOf(ChaoxingSignStatus(hapticFeedback)) }
+                    val userSelections = remember { mutableStateListOf(isSignForOther.not()) }
+                    val isSigning = remember { mutableStateOf(false) }
+                    AnimatedVisibility(
+                        isCheckingStatus.not(),
+                        enter =
+                            slideInHorizontally(
+                                initialOffsetX = { it },
+                                animationSpec = tween(300)
+                            ) + fadeIn(
+                                animationSpec = tween(300)
+                            ),
+                        exit =
+                            slideOutHorizontally(
+                                animationSpec = tween(300),
+                                targetOffsetX = { it }) +
+                                    fadeOut(animationSpec = tween(300)),
+                        modifier = Modifier.zIndex(1f)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(painterResource(R.drawable.ic_pattern_locking), null)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                "请绘制签到图案",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                modifier = Modifier.padding(0.dp, 6.dp)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Card(
+                                shape = RoundedCornerShape(18.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = Color.DarkGray
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .padding(10.dp, 12.dp)
+                                        .fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Icon(
+                                        painterResource(R.drawable.ic_face_slightly_frowning),
+                                        contentDescription = "Info",
+                                        tint = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.width(9.dp))
+                                    Text(
+                                        "由于随地大小签是一个完整在本机发送网络请求的软件，无法做到暴力大量发送网络请求破解手势码，目前只有在知道手势码的情况下才可以进行签到。",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        lineHeight = 18.sp,
+                                        fontWeight = FontWeight.W500
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(28.dp),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                val patternLockerView = remember {
+                                    PatternLockerView(context).apply {
+                                        (normalCellView as? DefaultLockerNormalCellView?)?.let {
+                                            it.styleDecorator.lineWidth = 15f
+                                            it.styleDecorator.normalColor = 0xFF63BBD0.toInt()
+                                            it.styleDecorator.hitColor = 0xFF3F51B5.toInt()
+                                        }
+                                        setOnPatternChangedListener(object :
+                                            OnPatternChangeListener {
+                                            override fun onChange(
+                                                view: PatternLockerView,
+                                                hitIndexList: List<Int>
+                                            ) {
+                                                hapticFeedback.performHapticFeedback(
+                                                    HapticFeedbackType.SegmentFrequentTick
+                                                )
+                                            }
+
+                                            override fun onClear(view: PatternLockerView) {
+                                                view.updateStatus(false)
+                                            }
+
+                                            override fun onComplete(
+                                                view: PatternLockerView,
+                                                hitIndexList: List<Int>
+                                            ) {
+                                                val currentGestureOrderCode =
+                                                    hitIndexList.joinToString("") { (it + 1).toString() }
+                                                coroutineScope.launch {
+                                                    runCatching {
+                                                        if (signer.checkSignGesture(
+                                                                currentGestureOrderCode
+                                                            )
+                                                        ) {
+                                                            hapticFeedback.performHapticFeedback(
+                                                                HapticFeedbackType.Confirm
+                                                            )
+                                                            text = currentGestureOrderCode
+                                                            isCheckingStatus = true
+                                                            snackbarHost.displaySnackbar(
+                                                                "签到码验证成功",
+                                                                coroutineScope
+                                                            )
+                                                        } else {
+                                                            hapticFeedback.performHapticFeedback(
+                                                                HapticFeedbackType.Reject
+                                                            )
+                                                            snackbarHost.displaySnackbar(
+                                                                "签到码错误，请重新输入",
+                                                                coroutineScope
+                                                            )
+                                                            view.updateStatus(true)
+                                                            coroutineScope.launch {
+                                                                delay(600.milliseconds)
+                                                                view.clearHitState()
+                                                            }
+                                                        }
+                                                    }.onFailure {
+                                                        it.snackbarReport(
+                                                            snackbarHost,
+                                                            coroutineScope,
+                                                            "签到码验证失败",
+                                                            hapticFeedback
+                                                        )
+                                                        view.updateStatus(true)
+                                                    }
+                                                }
+                                            }
+
+                                            override fun onStart(view: PatternLockerView) {
+                                                view.updateStatus(false)
+                                            }
+                                        })
+                                    }
+                                }
+                                AndroidView(
+                                    {
+                                        patternLockerView
+                                    }, modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(1f)
+                                ) { view ->
+                                    view.requestLayout()
+                                }
+                            }
+                        }
+                    }
+                    val signHandler = remember {
+                        ChaoxingSignHandler<String>(
+                            context = context, userSelections = userSelections,
+                            signStatus = signStatus,
+                            onSelfSigning = { value ->
+                                runCatching {
+                                    if (signer.sign(value, locationData)) {
+                                        val resolution =
+                                            suspendCancellableCoroutine { continuation ->
+                                                captchaValidateParams =
+                                                    signer to { captchaResult ->
+                                                        if (continuation.isActive)
+                                                            continuation.resumeWith(captchaResult)
+                                                    }
+                                            }
+                                        signer.sign(
+                                            value,
+                                            locationData,
+                                            resolution.validate
+                                        )
+                                        return@runCatching ChaoxingSignResult(
+                                            isCaptchaSigning = true,
+                                            isCaptchaResolvedByModel = resolution.resolvedByModel
+                                        )
+                                    } else return@runCatching ChaoxingSignResult(
+                                        isCaptchaSigning = false,
+                                        isCaptchaResolvedByModel = false
+                                    )
+                                }.onFailure {
+                                    if (it is ChaoxingSigner.WrongPositionException &&
+                                        it.isAlreadyDisabledRandomizedLocation
+                                    ) locationData = null
+                                }
+                            }, onOtherUserSigning = { value, session, bypassChecking, _ ->
+                                runCatching {
+                                    ChaoxingHttpRequesterPool.getRequester(
+                                        context,
+                                        session.phoneNumber
+                                    )
+                                        .let { client ->
+                                            ChaoxingGestureSigner(
+                                                client,
+                                                if (isAlwaysForceSign || bypassChecking) destination.copy(
+                                                    classId = ChaoxingCourseHelper.getClassIdFromCourseId(
+                                                        client,
+                                                        destination.courseId
+                                                    ).getOrNull() ?: destination.classId
+                                                ) else destination,
+                                                signer.getSignInfo()
+                                            ).run {
+                                                if (!(isAlwaysForceSign || bypassChecking)) checkSignStatusThrowException(
+                                                    context
+                                                )
+                                                if (sign(value, locationData)) {
+                                                    val resolution =
+                                                        suspendCancellableCoroutine { continuation ->
+                                                            captchaValidateParams =
+                                                                this to { captchaResult ->
+                                                                    if (continuation.isActive) {
+                                                                        continuation.resumeWith(
+                                                                            captchaResult
+                                                                        )
+                                                                    }
+                                                                }
+                                                        }
+                                                    sign(
+                                                        value,
+                                                        locationData,
+                                                        resolution.validate
+                                                    )
+                                                    return@runCatching ChaoxingSignResult(
+                                                        isCaptchaSigning = true,
+                                                        isCaptchaResolvedByModel = resolution.resolvedByModel
+                                                    )
+                                                } else return@runCatching ChaoxingSignResult(
+                                                    isCaptchaSigning = false,
+                                                    isCaptchaResolvedByModel = false
+                                                )
+                                            }
+                                        }
+                                }.onFailure {
+                                    if (it is ChaoxingSigner.WrongPositionException &&
+                                        it.isAlreadyDisabledRandomizedLocation
+                                    ) locationData = null
+                                }
+                            },
+                            onSigningFinished = { _, name, isOtherUser ->
+                                locationData?.saveSelectedLocation(
+                                    context, destination.classId, coroutineScope
+                                ) {
+                                    locationData = it
+                                }
+                            }, onAllSigningFinished = { isSuccessful ->
+                                isSigning.value = false
+                            }, destination = destination
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(0f)
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp, 4.dp, 8.dp, 0.dp)) {
+                            OtherUserSelectorComponent(
+                                navToOtherUser = { navToOtherUserDestination() },
+                                signStatus = signStatus,
+                                isCurrentAlreadySigned = isSignForOther,
+                                userSelections = userSelections,
+                                isCloneSession = destination.isCloneSession,
+                                isSigning = isSigning,
+                                prefixTipsContent = {
+                                    if (signoffData != null)
+                                        SignOutRedirectTips(
+                                            signoffData!!
+                                        ) {
+                                            navToOtherSign(it)
+                                        }
+                                    if (destination.startTime != null)
+                                        SignPotentialWarningTips(
+                                            destination.startTime,
+                                            destination.endTime,
+                                            destination.isLate
+                                        )
+                                    if (isMapRequired) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(0.dp, 6.dp)
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    "签到位置：",
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(locationData?.address ?: "尚未选择位置")
+                                            }
+                                            Button(onClick = {
+                                                isMapGetting = true
+                                            }) {
+                                                Text(if (locationData == null) "选择位置" else "重新获取位置")
+                                            }
+                                        }
+                                    }
+                                }, onRetrySignAction = { index, session, bypassChecking ->
+                                    signHandler.retryOtherUserSigning(
+                                        session,
+                                        index,
+                                        bypassChecking,
+                                        hapticFeedback,
+                                        coroutineScope,
+                                        snackbarHost
+                                    ).onFailure {
+                                        if (it is ChaoxingSigner.WrongPositionException &&
+                                            it.isAlreadyDisabledRandomizedLocation
+                                        ) locationData = null
+                                    }
+                                }
+                            ) { isSelf, otherUserSessionList, _ ->
+                                if (!isCheckingStatus) {
+                                    coroutineScope.launch {
+                                        snackbarHost.currentSnackbarData?.dismiss()
+                                        snackbarHost.showSnackbar(
+                                            "请先输入正确的图案签到码",
+                                            withDismissAction = true
+                                        )
+                                    }
+                                    return@OtherUserSelectorComponent
+                                }
+                                if (isMapRequired && locationData == null) {
+                                    pendingAutoSignAction = {
+                                        isSigning.value = true
+                                        signHandler.startSigning(
+                                            text,
+                                            isSelf,
+                                            otherUserSessionList,
+                                            hapticFeedback,
+                                            coroutineScope,
+                                            snackbarHost
+                                        )
+                                    }
+                                    isMapGetting = true
+                                    return@OtherUserSelectorComponent
+                                }
+                                isSigning.value = true
+                                signHandler.startSigning(
+                                    text,
+                                    isSelf,
+                                    otherUserSessionList,
+                                    hapticFeedback,
+                                    coroutineScope,
+                                    snackbarHost
+                                )
+                            }
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zIndex(1f)
+                        ) {
+                            AnimatedVisibility(
+                                isMapGetting,
+                                enter =
+                                    slideInHorizontally(
+                                        initialOffsetX = { it },
+                                        animationSpec = tween(300)
+                                    ) + fadeIn(
+                                        animationSpec = tween(300)
+                                    ),
+                                exit =
+                                    slideOutHorizontally(
+                                        animationSpec = tween(300),
+                                        targetOffsetX = { it }) +
+                                            fadeOut(animationSpec = tween(300)),
+                                modifier = Modifier.zIndex(1f)
+                            ) {
+                                GetLocationComponent(
+                                    classId = destination.classId,
+                                    confirmButtonText = {
+                                        Text("设置")
+                                    }) {
+                                    isMapGetting = false
+                                    locationData = it
+                                    pendingAutoSignAction?.invoke()
+                                    pendingAutoSignAction = null
+                                }
+                                BackHandler(isMapGetting) {
+                                    pendingAutoSignAction = null
+                                    isSigning.value = false
+                                    isMapGetting = false
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    CenterCircularProgressIndicator()
+                }
+            }
+        }
+    }
+}

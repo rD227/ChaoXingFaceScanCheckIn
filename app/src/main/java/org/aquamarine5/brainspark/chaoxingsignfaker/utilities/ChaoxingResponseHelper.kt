@@ -1,0 +1,267 @@
+/*
+ * Copyright (c) 2025-2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
+package org.aquamarine5.brainspark.chaoxingsignfaker.utilities
+
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.os.NetworkOnMainThreadException
+import android.widget.Toast
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.Response
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingHttpClient
+import org.aquamarine5.brainspark.chaoxingsignfaker.signer.ChaoxingSigner
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import javax.net.ssl.SSLHandshakeException
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.contract
+
+@OptIn(ExperimentalContracts::class)
+inline fun checkPredictable(value: Boolean, lazyMessage: () -> Any = { "Check failed." }) {
+    contract { returns() implies value }
+    if (!value) throw ChaoxingPredictableException(lazyMessage().toString())
+}
+
+@OptIn(ExperimentalContracts::class)
+inline fun requirePredictable(value: Boolean, lazyMessage: () -> Any = { "Failed requirement." }) {
+    contract { returns() implies value }
+    if (!value) throw ChaoxingPredictableException(lazyMessage().toString())
+}
+
+fun Throwable.getNetworkExceptionMessage(): String? = when (this) {
+    is UnknownHostException -> "网络连接异常"
+    is SocketTimeoutException -> "网络连接超时"
+    is SSLHandshakeException -> "网络连接失败"
+    is ConnectException -> "无法连接到服务器"
+    is NetworkOnMainThreadException -> "网络调用方法异常"
+    else -> null
+}
+
+fun Throwable.getThisOrCauseNetworkExceptionMessage(): String? =
+    generateSequence(this) { it.cause }
+        .firstNotNullOfOrNull { it.getNetworkExceptionMessage() }
+
+fun Response.checkResponseThrowException() {
+    if (!isSuccessful) {
+        throw ChaoxingHttpClient.ChaoxingNetworkException(
+            when (code) {
+                403 -> "网络异常，访问被拒绝"
+                404 -> "网络异常，资源未找到"
+                500 -> "网络异常，服务器内部错误"
+                else -> "网络异常，错误码：$code"
+            } + "，响应体：${body.string()}",
+            responseCode = code
+        )
+    }
+}
+
+suspend fun Response.checkResponse(context: Context): Boolean =
+    if (isSuccessful) {
+        false
+    } else {
+        withContext(Dispatchers.Main) {
+            Toast.makeText(
+                context, when (code) {
+                    403 -> "网络异常，访问被拒绝"
+                    404 -> "网络异常，资源未找到"
+                    500 -> "网络异常，服务器内部错误"
+                    else -> "网络异常，错误码：$code"
+                }, Toast.LENGTH_LONG
+            ).show()
+        }
+        true
+    }
+
+@Deprecated("Use Response.checkResponseThrowException()")
+suspend fun Response.checkResponse(snackbarHostState: SnackbarHostState): Boolean =
+    if (isSuccessful) {
+        false
+    } else {
+        coroutineScope {
+            launch {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar(
+                    when (code) {
+                        403 -> "网络异常，访问被拒绝"
+                        404 -> "网络异常，资源未找到"
+                        500 -> "网络异常，服务器内部错误"
+                        else -> "网络异常，错误码：$code"
+                    },
+                    withDismissAction = true
+                )
+            }
+        }
+        true
+    }
+
+fun Throwable.toastReport(
+    context: Context,
+    prefixTips: String? = null,
+    hapticFeedback: HapticFeedback? = null
+) {
+    if (this is CancellationException) throw this
+    this.cause?.printStackTrace()
+    this.printStackTrace()
+    hapticFeedback?.performHapticFeedback(HapticFeedbackType.Reject)
+    val networkExceptionTips = this.getNetworkExceptionMessage()
+    val thisOrCauseNetworkExceptionTips = this.getThisOrCauseNetworkExceptionMessage()
+    if (networkExceptionTips != null) {
+        Toast.makeText(
+            context,
+            "${prefixTips?.plus(" ") ?: ""}$networkExceptionTips",
+            Toast.LENGTH_LONG
+        ).show()
+    } else if (thisOrCauseNetworkExceptionTips != null) {
+        Toast.makeText(
+            context,
+            "${prefixTips?.plus(" ") ?: ""}${this.getPredictableMessage()}$thisOrCauseNetworkExceptionTips",
+            Toast.LENGTH_LONG
+        ).show()
+    } else if (this !is ChaoxingPredictableException) {
+        reportLocalError()
+        Toast.makeText(
+            context,
+            "${prefixTips?.plus(" ") ?: ""}预期外错误:${this.getPredictableMessage()}",
+            Toast.LENGTH_LONG
+        ).show()
+    } else {
+        Toast.makeText(
+            context,
+            "${prefixTips?.plus(" ") ?: ""}${this.getPredictableMessage()}",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+}
+
+fun Throwable.snackbarReport(
+    snackbarHostState: SnackbarHostState?,
+    coroutineScope: CoroutineScope,
+    prefixTips: String? = null,
+    hapticFeedback: HapticFeedback,
+    shouldDismiss: Boolean = true,
+    duration: SnackbarDuration = SnackbarDuration.Short,
+    actionLabel: String? = null,
+    onSnackbarResult: ((SnackbarResult) -> Unit)? = null
+) {
+    if (this is CancellationException) throw this
+    if (!coroutineScope.isActive) return
+    this.cause?.printStackTrace()
+    this.printStackTrace()
+    hapticFeedback.performHapticFeedback(HapticFeedbackType.Reject)
+    val networkExceptionTips = this.getNetworkExceptionMessage()
+    val thisOrCauseNetworkExceptionTips = this.getThisOrCauseNetworkExceptionMessage()
+    if (networkExceptionTips != null) {
+        if (shouldDismiss)
+            snackbarHostState?.currentSnackbarData?.dismiss()
+        coroutineScope.launch {
+            snackbarHostState?.showSnackbar(
+                "${prefixTips?.plus(" ") ?: ""}$networkExceptionTips",
+                actionLabel,
+                true,
+                duration
+            )?.apply {
+                onSnackbarResult?.invoke(this)
+            }
+        }
+    } else if (thisOrCauseNetworkExceptionTips != null) {
+        if (shouldDismiss)
+            snackbarHostState?.currentSnackbarData?.dismiss()
+        coroutineScope.launch {
+            snackbarHostState?.showSnackbar(
+                "${prefixTips?.plus(" ") ?: ""}${this@snackbarReport.getPredictableMessage()}$thisOrCauseNetworkExceptionTips",
+                actionLabel,
+                true,
+                duration
+            )?.apply {
+                onSnackbarResult?.invoke(this)
+            }
+        }
+    } else if (this !is ChaoxingPredictableException) {
+        reportLocalError()
+        if (shouldDismiss)
+            snackbarHostState?.currentSnackbarData?.dismiss()
+        coroutineScope.launch {
+            snackbarHostState?.showSnackbar(
+                "${prefixTips?.plus(" ") ?: ""}预期外错误:${this@snackbarReport.getPredictableMessage()}",
+                actionLabel,
+                true,
+                duration
+            )?.apply {
+                onSnackbarResult?.invoke(this)
+            }
+        }
+    } else if (this.cause != null && this.cause !is ChaoxingPredictableException) {
+        this.cause?.let {
+            if (shouldDismiss)
+                snackbarHostState?.currentSnackbarData?.dismiss()
+            coroutineScope.launch {
+                snackbarHostState?.showSnackbar(
+                    "${prefixTips?.plus(" ") ?: ""}${it.getPredictableMessage()}",
+                    actionLabel,
+                    true,
+                    duration
+                )?.apply {
+                    onSnackbarResult?.invoke(this)
+                }
+            }
+        }
+    } else {
+        if (shouldDismiss)
+            snackbarHostState?.currentSnackbarData?.dismiss()
+        coroutineScope.launch {
+            snackbarHostState?.showSnackbar(
+                "${prefixTips?.plus(" ") ?: ""}${this@snackbarReport.getPredictableMessage()}",
+                actionLabel,
+                true,
+                duration
+            )?.apply {
+                onSnackbarResult?.invoke(this)
+            }
+        }
+    }
+}
+
+fun Throwable.reportLocalError() {
+    if (this is CancellationException) throw this
+    if (this is ChaoxingPredictableException) return
+    if (this is ActivityNotFoundException) return
+    if (getThisOrCauseNetworkExceptionMessage() != null) return
+    android.util.Log.e("FaceScanLocal", javaClass.simpleName)
+}
+
+val Throwable.isSessionObsoletedCausing: Boolean
+    get() = generateSequence(this) { it.cause }
+        .any { it is ChaoxingUserSessionOutdatedException }
+
+fun Throwable.ifShouldDeselect(action: () -> Unit) {
+    if (this is ChaoxingSigner.AlreadySignedException ||
+        this is ChaoxingSigner.PredictedAlreadySignedException ||
+        this is ChaoxingSigner.SignActivityNoPermissionException
+    ) {
+        action()
+    }
+}
+
+fun <T> List<T?>.checkIsLast(fromIndex: Int): Boolean {
+    if (this.size - 1 == fromIndex) return true
+    for (i in fromIndex + 1 until this.size) {
+        if (this[i] != null) return false
+    }
+    return true
+}

@@ -1,0 +1,388 @@
+/*
+ * Copyright (c) 2025-2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
+package org.aquamarine5.brainspark.chaoxingsignfaker.api
+
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.res.painterResource
+import com.alibaba.fastjson2.JSONObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.Request
+import org.aquamarine5.brainspark.chaoxingsignfaker.R
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingQRCodeParseResult
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingSignActivityEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.SignDestination
+import org.aquamarine5.brainspark.chaoxingsignfaker.screen.GestureSignDestination
+import org.aquamarine5.brainspark.chaoxingsignfaker.screen.GetLocationDestination
+import org.aquamarine5.brainspark.chaoxingsignfaker.screen.PasswordSignDestination
+import org.aquamarine5.brainspark.chaoxingsignfaker.screen.PhotoSignDestination
+import org.aquamarine5.brainspark.chaoxingsignfaker.screen.QRCodeSignDestination
+import org.aquamarine5.brainspark.chaoxingsignfaker.signer.ChaoxingGestureSigner
+import org.aquamarine5.brainspark.chaoxingsignfaker.signer.ChaoxingLocationSigner
+import org.aquamarine5.brainspark.chaoxingsignfaker.signer.ChaoxingPasswordSigner
+import org.aquamarine5.brainspark.chaoxingsignfaker.signer.ChaoxingPhotoSigner
+import org.aquamarine5.brainspark.chaoxingsignfaker.signer.ChaoxingQRCodeSigner
+import org.aquamarine5.brainspark.chaoxingsignfaker.signer.ChaoxingSigner
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.ChaoxingParseDataException
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.ChaoxingPredictableException
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.OnlyAppDevelopedMode
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.checkResponseThrowException
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.requirePredictable
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration.Companion.milliseconds
+
+object ChaoxingSignHelper {
+    private val signIconMap = mapOf(
+        "0" to R.drawable.ic_square_mouse_pointer,
+        "3" to R.drawable.ic_pattern_locking,
+        "4" to R.drawable.ic_map_pin,
+        "2" to R.drawable.ic_scan_qr_code,
+        "5" to R.drawable.ic_binary
+    )
+
+    private val painterCache = ConcurrentHashMap<Int, Painter>(6)
+
+    class ChaoxingUnsupportedSignTypeException(throwable: Throwable? = null) :
+        ChaoxingParseDataException("不支持此签到类型", throwable)
+
+    @Composable
+    fun getSignIcon(activity: ChaoxingSignActivityEntity): Painter {
+        val iconRes = signIconMap[activity.otherId] ?: R.drawable.ic_clipboard_pen_line
+        return painterCache.getOrPut(iconRes) {
+            painterResource(id = iconRes)
+        }
+    }
+
+    fun getPredictedSignIconRes(title: String): Int = when (title) {
+        "位置签到" -> R.drawable.ic_map_pin
+        "二维码签到" -> R.drawable.ic_scan_qr_code
+        "拍照签到" -> R.drawable.ic_square_mouse_pointer
+        "手势签到" -> R.drawable.ic_pattern_locking
+        "签到码签到" -> R.drawable.ic_binary
+        else -> R.drawable.ic_clipboard_pen_line
+    }
+
+    @Composable
+    fun getPredictedSignIcon(title: String): Painter {
+        val iconRes = getPredictedSignIconRes(title)
+        return painterCache.getOrPut(iconRes) {
+            painterResource(id = iconRes)
+        }
+    }
+
+    @OnlyAppDevelopedMode
+    fun getSigner(
+        client: ChaoxingHttpRequester,
+        activity: ChaoxingSignActivityEntity,
+        isLate: Boolean = false,
+        isCloneSession: Boolean = false
+    ): ChaoxingSigner =
+        when (activity.otherId) {
+            "5" -> ChaoxingPasswordSigner(
+                client,
+                PasswordSignDestination.parseFromSignActivityEntity(
+                    activity,
+                    isLate,
+                    isCloneSession
+                )
+            )
+
+            "4" -> ChaoxingLocationSigner(
+                client,
+                GetLocationDestination.parseFromSignActivityEntity(activity, isLate, isCloneSession)
+            )
+
+            "2" -> ChaoxingQRCodeSigner(
+                client,
+                QRCodeSignDestination.parseFromSignActivityEntity(activity, isLate, isCloneSession)
+            )
+
+            "0" -> ChaoxingPhotoSigner(
+                client,
+                PhotoSignDestination.parseFromSignActivityEntity(activity, isLate, isCloneSession)
+            )
+
+            "3" -> ChaoxingGestureSigner(
+                client,
+                GestureSignDestination.parseFromSignActivityEntity(activity, isLate, isCloneSession)
+            )
+
+            else -> throw ChaoxingUnsupportedSignTypeException()
+        }
+
+
+    fun getSignDestination(
+        context: Context,
+        activityEntity: ChaoxingSignActivityEntity,
+        isLate: Boolean = false,
+        isCloneSession: Boolean,
+    ): SignDestination? =
+        when (activityEntity.otherId) {
+            "5" -> PasswordSignDestination.parseFromSignActivityEntity(
+                activityEntity,
+                isLate,
+                isCloneSession
+            )
+
+            "4" -> GetLocationDestination.parseFromSignActivityEntity(
+                activityEntity,
+                isLate,
+                isCloneSession
+            )
+
+            "2" -> QRCodeSignDestination.parseFromSignActivityEntity(
+                activityEntity,
+                isLate,
+                isCloneSession
+            )
+
+            "0" -> PhotoSignDestination.parseFromSignActivityEntity(
+                activityEntity,
+                isLate,
+                isCloneSession
+            )
+
+            "3" -> GestureSignDestination.parseFromSignActivityEntity(
+                activityEntity,
+                isLate,
+                isCloneSession
+            )
+
+            else -> {
+                Toast.makeText(context, "暂不支持该活动类型", Toast.LENGTH_SHORT).show()
+                null
+            }
+        }
+
+    suspend fun getIMSignDestination(
+        atypeName: String,
+        activeId: Long,
+        classId: Int,
+        courseId: Long
+    ): SignDestination? {
+        return when (atypeName) {
+            "密码签到" -> PasswordSignDestination(
+                activeId,
+                classId,
+                courseId,
+                "",
+                null,
+                null,
+                false,
+                isCloneSession = false
+            )
+
+            "位置签到" -> GetLocationDestination(
+                activeId,
+                classId,
+                courseId,
+                "",
+                null,
+                null,
+                false, isCloneSession = false
+            )
+
+            "二维码签到" -> QRCodeSignDestination(
+                activeId,
+                classId,
+                courseId,
+                "",
+                null,
+                null,
+                false, isCloneSession = false
+            )
+
+            "拍照签到" -> PhotoSignDestination(
+                activeId,
+                classId,
+                courseId,
+                "",
+                null,
+                null,
+                false, isCloneSession = false
+            )
+
+            "手势签到" -> GestureSignDestination(
+                activeId,
+                classId,
+                courseId,
+                "",
+                null,
+                null,
+                false, isCloneSession = false
+            )
+
+            else -> getRedirectDestination(activeId, classId, courseId)
+        }
+    }
+
+    suspend fun getRedirectDestination(
+        activeId: Long,
+        classId: Int,
+        courseId: Long
+    ): SignDestination =
+        withContext(Dispatchers.IO) {
+            ChaoxingHttpClient.instance!!.newCall(
+                Request.Builder().get().url(
+                    ChaoxingSigner.URL_SIGN_INFO.newBuilder()
+                        .addQueryParameter("activeId", activeId.toString())
+                        .build()
+                ).build()
+            ).execute().use {
+                it.checkResponseThrowException()
+                val result = JSONObject.parseObject(it.body.string()).getJSONObject("data")
+                val endTime = result.getLong("endTime")
+                when (result.getInteger("otherId")) {
+                    0 -> PhotoSignDestination(
+                        activeId,
+                        classId,
+                        courseId,
+                        "",
+                        result.getLong("starttime"),
+                        endTime,
+                        if (endTime != null) System.currentTimeMillis() > endTime else false,
+                        isCloneSession = false
+                    )
+
+                    2 -> QRCodeSignDestination(
+                        activeId,
+                        classId,
+                        courseId,
+                        "",
+                        result.getLong("starttime"),
+                        endTime,
+                        if (endTime != null) System.currentTimeMillis() > endTime else false,
+                        isCloneSession = false
+                    )
+
+                    4 -> GetLocationDestination(
+                        activeId,
+                        classId,
+                        courseId,
+                        "",
+                        result.getLong("starttime"),
+                        endTime,
+                        if (endTime != null) System.currentTimeMillis() > endTime else false,
+                        isCloneSession = false
+                    )
+
+                    5 -> PasswordSignDestination(
+                        activeId,
+                        classId,
+                        courseId,
+                        "",
+                        result.getLong("starttime"),
+                        endTime,
+                        if (endTime != null) System.currentTimeMillis() > endTime else false,
+                        isCloneSession = false
+                    )
+
+                    3 -> GestureSignDestination(
+                        activeId,
+                        classId,
+                        courseId,
+                        "",
+                        result.getLong("starttime"),
+                        endTime,
+                        if (endTime != null) System.currentTimeMillis() > endTime else false,
+                        isCloneSession = false
+                    )
+
+                    else -> {
+                        throw ChaoxingUnsupportedSignTypeException()
+                    }
+                }
+            }
+        }
+
+    suspend fun getScannedQRCodeDestination(
+        client: ChaoxingHttpRequester,
+        parseResult: ChaoxingQRCodeParseResult,
+        isCloneSession: Boolean
+    ): SignDestination = withContext(Dispatchers.IO) {
+        val activeId = parseResult.aid
+        requirePredictable(activeId != null) { "二维码中未包含签到活动 ID" }
+        val result = client.newCall(
+            Request.Builder().get().url(
+                ChaoxingSigner.URL_SIGN_INFO.newBuilder()
+                    .addQueryParameter("activeId", activeId.toString())
+                    .build()
+            ).build()
+        ).execute().use {
+            it.checkResponseThrowException()
+            JSONObject.parseObject(it.body.string()).getJSONObject("data")
+                ?: throw ChaoxingPredictableException("获取签到活动信息失败，请确认二维码是否为有效的签到二维码")
+        }
+        val classId = result.getIntValue("clazzid")
+        val courseId = result.getLong("courseId")?.takeIf { it != 0L }
+            ?: ChaoxingCourseHelper.getCourseIdFromClassId(client, classId).getOrNull() ?: 0L
+        val startTime = result.getLong("starttime")
+        val endTime = result.getLong("endtime")
+        val isLate = endTime != null && System.currentTimeMillis() > endTime
+        when (result.getInteger("otherId")) {
+            0 -> PhotoSignDestination(
+                activeId,
+                classId,
+                courseId,
+                "",
+                startTime,
+                endTime,
+                isLate,
+                isCloneSession
+            )
+
+            2 -> QRCodeSignDestination(
+                activeId,
+                classId,
+                courseId,
+                "",
+                startTime,
+                endTime,
+                isLate,
+                isCloneSession
+            )
+
+            4 -> GetLocationDestination(
+                activeId,
+                classId,
+                courseId,
+                "",
+                startTime,
+                endTime,
+                isLate,
+                isCloneSession
+            )
+
+            5 -> PasswordSignDestination(
+                activeId,
+                classId,
+                courseId,
+                "",
+                startTime,
+                endTime,
+                isLate,
+                isCloneSession
+            )
+
+            3 -> GestureSignDestination(
+                activeId,
+                classId,
+                courseId,
+                "",
+                startTime,
+                endTime,
+                isLate,
+                isCloneSession
+            )
+
+            else -> throw ChaoxingUnsupportedSignTypeException()
+        }
+    }
+}

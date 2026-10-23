@@ -1,0 +1,1097 @@
+﻿/*
+ * Copyright (c) 2025-2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
+package org.aquamarine5.brainspark.chaoxingsignfaker.screen
+
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineBreak
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.Serializable
+import org.aquamarine5.brainspark.chaoxingsignfaker.BuildConfig
+import org.aquamarine5.brainspark.chaoxingsignfaker.R
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingCourseHelper
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingHttpClient
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingIMHelper
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingIMListener
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingLessonHelper
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingRecommendHelper
+import org.aquamarine5.brainspark.chaoxingsignfaker.api.ChaoxingSignHelper
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.BlockedContent
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.CenterCircularProgressIndicator
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.CourseInfoColumnCard
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.NetworkExceptionComponent
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.NewFeatureTipsCard
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.QRCodeScanComponent
+import org.aquamarine5.brainspark.chaoxingsignfaker.components.SnackbarAlertDialog
+import org.aquamarine5.brainspark.chaoxingsignfaker.datastore.ChaoxingCourseClass
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingCourseEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.ChaoxingGroupSignActivityEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.RecommendActivityEntity
+import org.aquamarine5.brainspark.chaoxingsignfaker.entity.SignDestination
+import org.aquamarine5.brainspark.chaoxingsignfaker.signer.ChaoxingQRCodeSigner
+import org.aquamarine5.brainspark.chaoxingsignfaker.ui.theme.FontApp
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.ChaoxingPredictableException
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.LocalImageLoader
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.LocalSnackbarHostState
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.chaoxingDataStore
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.disableCode
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.disableComposableCode
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.displaySnackbar
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.isDevelopedMode
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.reportLocalError
+import org.aquamarine5.brainspark.chaoxingsignfaker.utilities.snackbarReport
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
+
+@Serializable
+data class CourseListDestination(
+    val isCloneSession: Boolean = false
+)
+
+@Serializable
+object SignGraphDestination
+
+private const val SORT_TOP = 100
+private const val SORT_STAR = 10
+private const val SORT_UNFAVOURED = 5
+private const val SORT_COMMON = 0
+
+private val LESSON_SIGN_ACTIVITIES_POLL_INTERVAL = 5.seconds
+private val LESSON_SIGN_ACTIVITIES_POLL_TIMEOUT = 2.minutes
+
+@Composable
+fun CourseListScreen(
+    destination: CourseListDestination,
+    navToDetailDestination: (CourseDetailDestination) -> Unit,
+    navToSettingDestination: () -> Unit,
+    navToSignActivityDestination: (SignDestination) -> Unit,
+    navToLoginDestination: () -> Unit,
+    navToGroupDestination: (isCloneSession: Boolean) -> Unit,
+) {
+    val imageLoader = LocalImageLoader.current
+    val activeClient = ChaoxingHttpClient.getClientInstanceOrClone(destination.isCloneSession)
+    val courseCacheKey = "${activeClient?.phoneNumber}:${activeClient?.configuredFid}"
+    var savedCourseCacheKey by rememberSaveable { mutableStateOf(courseCacheKey) }
+    val activitiesData =
+        rememberSaveable(saver = ChaoxingCourseEntity.Saver) { mutableStateListOf() }
+    val preferredClassIds = rememberSaveable {
+        mutableListOf<Int>()
+    }
+    val hapticFeedback = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val snackbarHost = LocalSnackbarHostState.current
+    var recommendActivities by remember { mutableStateOf<List<RecommendActivityEntity>?>(null) }
+    var lessonSignActivities by remember { mutableStateOf<List<RecommendActivityEntity>?>(null) }
+    var imSignReminders by remember { mutableStateOf<List<ChaoxingGroupSignActivityEntity>?>(null) }
+    var isFetchedFailure by remember { mutableStateOf<Result<*>?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    val activityTimeFormatter = remember {
+        DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault())
+    }
+    val isCaptchaAutoResolveLearntTooltip = rememberSaveable { mutableStateOf(false) }
+    var isQRCodeScanning by remember { mutableStateOf(false) }
+    val isQRCodeScanPause = remember { mutableStateOf(false) }
+    val isQRCodeResolving = remember { mutableStateOf(false) }
+    val closeQRCodeScanner = {
+        isQRCodeScanning = false
+        isQRCodeResolving.value = false
+        isQRCodeScanPause.value = false
+    }
+    LaunchedEffect(courseCacheKey) {
+        if (savedCourseCacheKey != courseCacheKey) {
+            activitiesData.clear()
+            preferredClassIds.clear()
+            lessonSignActivities = null
+            imSignReminders = null
+            recommendActivities = null
+            isFetchedFailure = null
+            savedCourseCacheKey = courseCacheKey
+        }
+        withContext(Dispatchers.IO) {
+            disableCode {
+                recommendActivities =
+                    ChaoxingRecommendHelper.checkRecommendedActivities(context)
+            } //TODO: recommend
+            launch {
+                runCatching {
+                    val schedule = context.chaoxingDataStore.data.first().classSchedule
+                    if (schedule.lastFetchTimestamp +
+                        ChaoxingLessonHelper.LESSONS_CACHE_INTERVAL <
+                        System.currentTimeMillis() || schedule.lessonsList.isEmpty()
+                    ) {
+                        ChaoxingHttpClient.getClientInstanceOrClone(destination.isCloneSession)
+                            ?.let { ChaoxingLessonHelper.refreshLessons(it, context) }
+                    }
+                }.onFailure {
+                    it.snackbarReport(snackbarHost, coroutineScope, "刷新课表失败", hapticFeedback)
+                }
+            }
+            if (activitiesData.isEmpty()) {
+                isFetchedFailure = runCatching {
+                    val datastoreData = context.chaoxingDataStore.data.first()
+                    disableCode {
+                        datastoreData.apply {
+                            if (version <= 0) {
+                                ChaoxingHttpClient.instance?.let { httpClient ->
+                                    ChaoxingCourseHelper.getAllCourse(
+                                        httpClient,
+                                        context,
+                                        destination.isCloneSession,
+                                        navToLoginDestination
+                                    ).let { data ->
+                                        context.chaoxingDataStore.updateData { dataStore ->
+                                            dataStore.toBuilder().apply {
+                                                addAllPreferCourseClass(preferClassIdList.map { classId ->
+                                                    ChaoxingCourseClass.newBuilder()
+                                                        .setClassId(classId)
+                                                        .setCourseId(data.first { it.classId == classId }.courseId)
+                                                        .build()
+                                                })
+                                                setVersion(1)
+                                            }.build()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } //TODO: Recommend preferred class
+                    isCaptchaAutoResolveLearntTooltip.value =
+                        !datastoreData.learntTooltips.sliderCaptchaAutoResolveByModel
+                    preferredClassIds.addAll(
+                        datastoreData.preferClassIdList.reversed()
+                    )
+                    ChaoxingHttpClient.getClientInstanceOrClone(destination.isCloneSession)
+                        ?.let { httpClient ->
+                            ChaoxingCourseHelper.getAllCourse(
+                                httpClient,
+                                context,
+                                destination.isCloneSession,
+                                navToLoginDestination
+                            )
+                                .apply {
+                                    activitiesData.addAll(this.filter {
+                                        preferredClassIds.contains(it.classId)
+                                    }.map { it.apply { isPreferred.value = true } } + this.filter {
+                                        !preferredClassIds.contains(it.classId)
+                                    })
+                                }
+                        }
+                }.onFailure {
+                    it.snackbarReport(
+                        snackbarHost,
+                        coroutineScope,
+                        "获取课程列表失败",
+                        hapticFeedback
+                    )
+                }
+            }
+            launch {
+                runCatching {
+                    val deadlineTimestamp = System.currentTimeMillis() +
+                            LESSON_SIGN_ACTIVITIES_POLL_TIMEOUT.inWholeMilliseconds
+                    while (true) {
+                        val httpClient =
+                            ChaoxingHttpClient.getClientInstanceOrClone(destination.isCloneSession)
+                                ?: break
+                        val fetchedActivities =
+                            ChaoxingLessonHelper.checkCurrentLessonSignActivities(
+                                httpClient, context, activitiesData.toList()
+                            )
+                        lessonSignActivities = fetchedActivities
+                        if (fetchedActivities.isNotEmpty()) break
+                        if (System.currentTimeMillis() >= deadlineTimestamp) break
+                        delay(LESSON_SIGN_ACTIVITIES_POLL_INTERVAL)
+                    }
+                }.onFailure {
+                    it.snackbarReport(
+                        snackbarHost,
+                        coroutineScope,
+                        "检测课表签到事件失败",
+                        hapticFeedback
+                    )
+                }
+            }
+            disableCode {
+                launch {
+                    val httpClient =
+                        ChaoxingHttpClient.getClientInstanceOrClone(destination.isCloneSession)
+                            ?: return@launch
+                    val listenerScope: CoroutineScope = this
+                    val imUsername = httpClient.userEntity.uid.toString()
+                    val imPassword = ChaoxingIMHelper.resolveImPassword(
+                        httpClient.userEntity.imEncryptedPassword
+                    )
+                    runCatching {
+                        ChaoxingIMListener.ensureInit(context)
+                        withTimeout(20.seconds) {
+                            ChaoxingIMListener.ensureLogin(imUsername, imPassword)
+                        }
+                        ChaoxingIMListener.signReminderEvents.collect { event ->
+                            if (event.imUsername != imUsername) return@collect
+                            val entity = ChaoxingIMHelper.buildSignActivityEntity(
+                                listenerScope,
+                                event.activity,
+                                event.receivedTimestamp
+                            )
+                            imSignReminders =
+                                (imSignReminders.orEmpty() + entity).distinctBy { it.activeId }
+                        }
+                    }.onFailure {
+                        if (it is CancellationException) throw it
+                        it.snackbarReport(
+                            snackbarHost,
+                            coroutineScope,
+                            "监听 IM 签到提醒失败",
+                            hapticFeedback
+                        )
+                    }
+                }
+            }
+        }
+    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        BlockedContent {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp, 0.dp, 16.dp, 0.dp)
+            ) {
+                Crossfade(isFetchedFailure) { v ->
+                    if (activitiesData.isNotEmpty()) {
+                        var pullToRefreshState by remember { mutableStateOf(false) }
+                        PullToRefreshBox(
+                            isRefreshing = pullToRefreshState,
+                            onRefresh = {
+                                pullToRefreshState = true
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    isFetchedFailure = runCatching {
+                                        ChaoxingHttpClient.getClientInstanceOrClone(destination.isCloneSession)
+                                            ?.let { httpClient ->
+                                                ChaoxingCourseHelper.getAllCourse(
+                                                    httpClient,
+                                                    context,
+                                                    destination.isCloneSession,
+                                                    navToLoginDestination
+                                                )
+                                                    .apply {
+                                                        val newActivities = this.filter {
+                                                            preferredClassIds.contains(it.classId)
+                                                        }.map {
+                                                            it.apply {
+                                                                isPreferred.value = true
+                                                            }
+                                                        } + this.filter {
+                                                            !preferredClassIds.contains(it.classId)
+                                                        }
+                                                        activitiesData.clear()
+                                                        activitiesData.addAll(newActivities)
+                                                    }
+                                            }
+                                        ChaoxingHttpClient.getClientInstanceOrClone(destination.isCloneSession)
+                                            ?.let {
+                                                lessonSignActivities =
+                                                    ChaoxingLessonHelper.checkCurrentLessonSignActivities(
+                                                        it, context, activitiesData.toList()
+                                                    )
+                                            }
+                                    }.onFailure {
+                                        it.snackbarReport(
+                                            snackbarHost,
+                                            coroutineScope,
+                                            "获取课程列表失败",
+                                            hapticFeedback
+                                        )
+                                    }
+                                    delay(500.milliseconds)
+                                    pullToRefreshState = false
+                                }
+                            }
+                        ) {
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                disableComposableCode {
+                                    AnimatedVisibility(
+                                        recommendActivities != null,
+                                        enter = fadeIn() + slideInVertically(),
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    ) {
+                                        recommendActivities?.forEachIndexed { index, item ->
+                                            Card(
+                                                onClick = {
+                                                    hapticFeedback.performHapticFeedback(
+                                                        HapticFeedbackType.ContextClick
+                                                    )
+                                                    coroutineScope.launch {
+                                                        runCatching { item.destination.await() }
+                                                            .onSuccess {
+                                                                navToSignActivityDestination(
+                                                                    it
+                                                                )
+                                                            }
+                                                            .onFailure {
+                                                                it.snackbarReport(
+                                                                    snackbarHost,
+                                                                    coroutineScope,
+                                                                    "获取签到活动信息失败",
+                                                                    hapticFeedback
+                                                                )
+                                                            }
+                                                    }
+                                                },
+                                                shape = RoundedCornerShape(18.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .padding(24.dp, 8.dp)
+                                                        .padding(3.dp)
+                                                ) {
+                                                    Icon(
+                                                        painterResource(R.drawable.ic_brain_circuit),
+                                                        null
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Column {
+                                                        Text("根据平时的签到习惯推断出可能会点击的签到活动：")
+                                                        Text(buildAnnotatedString {
+                                                            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                                                                append(item.className)
+                                                            }
+                                                            append(" 在 ")
+                                                            withStyle(
+                                                                SpanStyle(
+                                                                    fontFamily = FontApp
+                                                                )
+                                                            ) {
+                                                                append(
+                                                                    activityTimeFormatter.format(
+                                                                        Instant.ofEpochMilli(
+                                                                            item.startTime
+                                                                        )
+                                                                    )
+                                                                )
+                                                            }
+                                                            append(" 的 ")
+                                                            append(item.activityName)
+                                                        })
+
+                                                    }
+                                                }
+                                            }
+                                            if (index != recommendActivities?.lastIndex) {
+                                                Spacer(modifier = Modifier.padding(vertical = 8.dp))
+                                            }
+
+                                        }
+                                    }
+                                } //TODO: Recommend
+
+                                var debouncePreviousTime by remember { mutableLongStateOf(0L) }
+                                var searchQuery by rememberSaveable { mutableStateOf("") }
+                                val filteredActivities =
+                                    if (searchQuery.isBlank()) activitiesData
+                                    else activitiesData.filter {
+                                        it.courseName.contains(searchQuery, ignoreCase = true) ||
+                                                (it.teacherName?.contains(
+                                                    searchQuery,
+                                                    ignoreCase = true
+                                                ) == true) ||
+                                                (it.schools?.contains(
+                                                    searchQuery,
+                                                    ignoreCase = true
+                                                ) == true)
+                                    }
+                                val groupedCourses = remember(filteredActivities.toList()) {
+                                    filteredActivities.groupBy { it.courseName to it.courseId }.values.toList()
+                                }
+                                LazyColumn {
+                                    item {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                    }
+                                    item {
+                                        Card(modifier = Modifier.zIndex(1f)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(16.dp, 8.dp)
+                                            ) {
+                                                Icon(
+                                                    painterResource(R.drawable.ic_circle_question_mark),
+                                                    null,
+                                                    modifier = Modifier
+                                                        .size(36.dp)
+                                                        .padding(2.dp)
+                                                )
+                                                Column(
+                                                    modifier = Modifier.padding(
+                                                        start = 12.dp
+                                                    )
+                                                ) {
+                                                    Text(
+                                                        "找不到要签到的班级或者签到的活动？可能老师是在群聊里面发起的签到",
+                                                        fontSize = 14.sp,
+                                                        lineHeight = 17.sp,
+                                                        style = TextStyle.Default.copy(
+                                                            lineBreak = LineBreak(
+                                                                strategy = LineBreak.Strategy.HighQuality,
+                                                                strictness = LineBreak.Strictness.Strict,
+                                                                wordBreak = LineBreak.WordBreak.Default
+                                                            )
+                                                        )
+                                                    )
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            hapticFeedback.performHapticFeedback(
+                                                                HapticFeedbackType.ContextClick
+                                                            )
+                                                            navToGroupDestination(destination.isCloneSession)
+                                                        },
+                                                        shape = RoundedCornerShape(18.dp),
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.Center,
+                                                            modifier = Modifier.fillMaxWidth()
+                                                        ) {
+                                                            Icon(
+                                                                painter = painterResource(R.drawable.ic_users_round),
+                                                                null,
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                            Spacer(modifier = Modifier.width(10.dp))
+                                                            Text(
+                                                                "从群聊列表查找签到",
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            hapticFeedback.performHapticFeedback(
+                                                                HapticFeedbackType.ContextClick
+                                                            )
+                                                            isQRCodeScanPause.value = false
+                                                            isQRCodeResolving.value = false
+                                                            isQRCodeScanning = true
+                                                        },
+                                                        shape = RoundedCornerShape(18.dp),
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.Center,
+                                                            modifier = Modifier.fillMaxWidth()
+                                                        ) {
+                                                            Icon(
+                                                                painter = painterResource(R.drawable.ic_scan_qr_code),
+                                                                null,
+                                                                modifier = Modifier.size(18.dp)
+                                                            )
+                                                            Spacer(modifier = Modifier.width(10.dp))
+                                                            Text(
+                                                                "扫描签到二维码",
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                    }
+                                    item {
+                                        AnimatedVisibility(
+                                            imSignReminders?.isNotEmpty() == true,
+                                            enter = fadeIn() + slideInVertically(),
+                                            modifier = Modifier.padding(bottom = 8.dp)
+                                        ) {
+                                            SignActivityPromptCard(
+                                                title = "根据 IM 实时通知发现的签到提醒：",
+                                                items = imSignReminders?.map { item ->
+                                                    SignActivityPromptItem(
+                                                        item.courseName,
+                                                        item.startTimeTitle,
+                                                        item.title,
+                                                        ChaoxingSignHelper.getPredictedSignIconRes(
+                                                            item.activeTypeName
+                                                        ),
+                                                        item.signDestination
+                                                    )
+                                                } ?: emptyList(),
+                                                onNavigateToSignActivity = navToSignActivityDestination
+                                            )
+                                        }
+                                    }
+                                    item {
+                                        AnimatedVisibility(
+                                            lessonSignActivities?.isNotEmpty() == true,
+                                            enter = fadeIn() + slideInVertically(),
+                                            modifier = Modifier.padding(bottom = 8.dp)
+                                        ) {
+                                            SignActivityPromptCard(
+                                                title = "根据当前课表推断的签到事件：",
+                                                items = lessonSignActivities?.map { item ->
+                                                    SignActivityPromptItem(
+                                                        item.className,
+                                                        activityTimeFormatter.format(
+                                                            Instant.ofEpochMilli(item.startTime)
+                                                        ),
+                                                        item.activityName,
+                                                        null,
+                                                        item.destination
+                                                    )
+                                                } ?: emptyList(),
+                                                onNavigateToSignActivity = navToSignActivityDestination
+                                            )
+                                        }
+                                    }
+                                    item {
+                                        NewFeatureTipsCard(
+                                            isCaptchaAutoResolveLearntTooltip,
+                                            tipsContent = {
+                                                val brainIconId = "brain_icon"
+                                                Text(
+                                                    buildAnnotatedString {
+                                                        append("现在验证码会通过内置的识别模型自动滑动完成了，自动完成的验证码会以")
+                                                        appendInlineContent(
+                                                            brainIconId,
+                                                            "[模型自动识别]"
+                                                        )
+                                                        append("显示，感谢 @0x77786d 提供的模型支持。")
+                                                    },
+                                                    inlineContent = mapOf(
+                                                        brainIconId to InlineTextContent(
+                                                            Placeholder(
+                                                                width = 16.sp,
+                                                                height = 16.sp,
+                                                                placeholderVerticalAlign = PlaceholderVerticalAlign.Center
+                                                            )
+                                                        ) {
+                                                            Icon(
+                                                                painterResource(R.drawable.ic_brain_circuit),
+                                                                contentDescription = "模型自动识别"
+                                                            )
+                                                        }
+                                                    ),
+                                                    fontSize = 14.sp,
+                                                    lineHeight = 16.sp
+                                                )
+                                            }
+                                        ) {
+                                            context.chaoxingDataStore.updateData {
+                                                it.toBuilder()
+                                                    .setLearntTooltips(
+                                                        it.learntTooltips.toBuilder()
+                                                            .setSliderCaptchaAutoResolveByModel(
+                                                                true
+                                                            ).build()
+                                                    ).build()
+                                            }
+                                        }
+                                    }
+                                    stickyHeader(key = "course_search") {
+                                        Column(modifier = Modifier.fillMaxWidth()) {
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.background,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                OutlinedTextField(
+                                                    value = searchQuery,
+                                                    onValueChange = { searchQuery = it },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(top = 4.dp, bottom = 3.dp),
+                                                    placeholder = { Text("搜索课程名称 / 老师 / 学校") },
+                                                    leadingIcon = {
+                                                        Icon(
+                                                            painterResource(R.drawable.ic_search),
+                                                            contentDescription = "搜索"
+                                                        )
+                                                    },
+                                                    trailingIcon = {
+                                                        if (searchQuery.isNotEmpty()) {
+                                                            IconButton(onClick = {
+                                                                hapticFeedback.performHapticFeedback(
+                                                                    HapticFeedbackType.ContextClick
+                                                                )
+                                                                searchQuery = ""
+                                                            }) {
+                                                                Icon(
+                                                                    painterResource(R.drawable.ic_x),
+                                                                    contentDescription = "清除搜索"
+                                                                )
+                                                            }
+                                                        }
+                                                    },
+                                                    singleLine = true,
+                                                    shape = RoundedCornerShape(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    if (searchQuery.isNotBlank() && groupedCourses.isEmpty()) {
+                                        item {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(vertical = 24.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.Center
+                                            ) {
+                                                Icon(
+                                                    painterResource(R.drawable.ic_circle_question_mark),
+                                                    null
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Text("没有找到与“$searchQuery”匹配的课程")
+                                            }
+                                        }
+                                    }
+                                    item {
+                                        Spacer(modifier = Modifier.height(5.dp))
+                                    }
+                                    items(
+                                        groupedCourses,
+                                        key = { "${it.first().courseId}_${it.first().courseName}" }) { group ->
+                                        val data = group.first()
+                                        val groupClassIds =
+                                            remember(group) { group.map { it.classId }.toSet() }
+                                        Column(
+                                            modifier = Modifier.animateItem(
+                                                placementSpec = spring(
+                                                    stiffness = Spring.StiffnessMediumLow,
+                                                    visibilityThreshold = IntOffset.VisibilityThreshold
+                                                ),
+                                                fadeInSpec = spring(
+                                                    stiffness = Spring.StiffnessMedium
+                                                ),
+                                                fadeOutSpec = spring(
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
+                                            )
+                                        ) {
+                                            CourseInfoColumnCard(
+                                                data,
+                                                imageLoader,
+                                                mergedCount = group.size,
+                                                mergedClassIds = remember(group) { group.map { it.classId } },
+                                                onPreferredResort = { isPreferred ->
+                                                    hapticFeedback.performHapticFeedback(
+                                                        HapticFeedbackType.ContextClick
+                                                    )
+                                                    if (isPreferred)
+                                                        coroutineScope.launch {
+                                                            val classIdsToAdd =
+                                                                groupClassIds.filterNot {
+                                                                    preferredClassIds.contains(it)
+                                                                }
+                                                            context.chaoxingDataStore.updateData {
+                                                                it.toBuilder()
+                                                                    .addAllPreferClassId(
+                                                                        classIdsToAdd
+                                                                    )
+                                                                    .build()
+                                                            }
+                                                            preferredClassIds.addAll(classIdsToAdd)
+                                                            group.forEach {
+                                                                it.isPreferred.value = true
+                                                            }
+                                                            activitiesData.sortByDescending {
+                                                                if (groupClassIds.contains(it.classId))
+                                                                    return@sortByDescending SORT_TOP
+                                                                if (preferredClassIds.contains(
+                                                                        it.classId
+                                                                    )
+                                                                ) return@sortByDescending SORT_STAR
+                                                                else return@sortByDescending SORT_COMMON
+                                                            }
+                                                        }
+                                                    else {
+                                                        coroutineScope.launch {
+                                                            context.chaoxingDataStore.updateData { dataStore ->
+                                                                dataStore.toBuilder().apply {
+                                                                    val newList =
+                                                                        preferClassIdList.filterNot {
+                                                                            groupClassIds.contains(
+                                                                                it
+                                                                            )
+                                                                        }
+                                                                    clearPreferClassId()
+                                                                    addAllPreferClassId(newList)
+                                                                }.build()
+                                                            }
+                                                            preferredClassIds.removeAll(
+                                                                groupClassIds
+                                                            )
+                                                            group.forEach {
+                                                                it.isPreferred.value = false
+                                                            }
+                                                            activitiesData.sortByDescending {
+                                                                if (groupClassIds.contains(it.classId))
+                                                                    return@sortByDescending SORT_UNFAVOURED
+                                                                if (preferredClassIds.contains(
+                                                                        it.classId
+                                                                    )
+                                                                ) return@sortByDescending SORT_STAR
+                                                                else return@sortByDescending SORT_COMMON
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            ) {
+                                                val currentTime = System.currentTimeMillis()
+                                                if (currentTime - debouncePreviousTime < 1000)
+                                                    return@CourseInfoColumnCard
+                                                debouncePreviousTime = currentTime
+                                                hapticFeedback.performHapticFeedback(
+                                                    HapticFeedbackType.ContextClick
+                                                )
+                                                navToDetailDestination(CourseDetailDestination(group))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if (v == null) {
+                        CenterCircularProgressIndicator()
+                    } else if (v.isFailure) {
+                        NetworkExceptionComponent(v.exceptionOrNull()!!) {
+                            coroutineScope.launch {
+                                isFetchedFailure = runCatching {
+                                    ChaoxingHttpClient.getClientInstanceOrClone(destination.isCloneSession)
+                                        ?.let { httpClient ->
+                                            ChaoxingCourseHelper.getAllCourse(
+                                                httpClient,
+                                                context,
+                                                destination.isCloneSession,
+                                                navToLoginDestination
+                                            )
+                                                .apply {
+                                                    activitiesData.addAll(this.filter {
+                                                        preferredClassIds.contains(it.classId)
+                                                    }.map {
+                                                        it.apply {
+                                                            isPreferred.value = true
+                                                        }
+                                                    } + this.filter {
+                                                        !preferredClassIds.contains(it.classId)
+                                                    })
+                                                }
+                                        }
+                                    ChaoxingHttpClient.getClientInstanceOrClone(destination.isCloneSession)
+                                        ?.let {
+                                            lessonSignActivities =
+                                                ChaoxingLessonHelper.checkCurrentLessonSignActivities(
+                                                    it, context, activitiesData.toList()
+                                                )
+                                        }
+                                }.onFailure {
+                                    it.snackbarReport(
+                                        snackbarHost,
+                                        coroutineScope,
+                                        "获取课程列表失败",
+                                        hapticFeedback
+                                    )
+                                }
+                            }
+                            isFetchedFailure = null
+                        }
+                    } else {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Column(
+                                modifier = Modifier.align(Alignment.Center),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(painterResource(R.drawable.ic_circle_question_mark), null)
+                                Text("暂无课程，请检查登录的学习通账号是否正确。")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        AnimatedVisibility(
+            isQRCodeScanning,
+            enter = slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = tween(300)
+            ),
+            exit = slideOutHorizontally(
+                animationSpec = tween(400),
+                targetOffsetX = { (it * 1.5).toInt() }
+            )
+        ) {
+            BackHandler(isQRCodeScanning, closeQRCodeScanner)
+            QRCodeScanComponent(
+                isPause = isQRCodeScanPause,
+                isLoading = isQRCodeResolving,
+                onClose = closeQRCodeScanner,
+                onScanResult = { barcode ->
+                    if (isQRCodeScanPause.value) return@QRCodeScanComponent
+                    isQRCodeScanPause.value = true
+                    isQRCodeResolving.value = true
+                    coroutineScope.launch {
+                        runCatching {
+                            val parseResult = ChaoxingQRCodeSigner.parseQRCode(barcode)
+                            val httpClient = ChaoxingHttpClient.getClientInstanceOrClone(
+                                destination.isCloneSession
+                            ) ?: throw ChaoxingPredictableException("请先登录后再扫描签到二维码")
+                            ChaoxingSignHelper.getScannedQRCodeDestination(
+                                httpClient,
+                                parseResult,
+                                destination.isCloneSession
+                            )
+                        }.onSuccess { scannedDestination ->
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.ContextClick)
+                            isQRCodeResolving.value = false
+                            isQRCodeScanning = false
+                            navToSignActivityDestination(scannedDestination)
+                        }.onFailure { throwable ->
+                            (throwable as? ChaoxingQRCodeSigner.QRCodeParseException)?.let {
+                                if (isDevelopedMode)
+                                    snackbarHost.displaySnackbar(it.rawValue, coroutineScope)
+                            } ?: throwable.reportLocalError()
+                            throwable.snackbarReport(
+                                snackbarHost,
+                                coroutineScope,
+                                "无法识别该签到二维码",
+                                hapticFeedback
+                            )
+                            isQRCodeResolving.value = false
+                            delay(1.seconds)
+                            isQRCodeScanPause.value = false
+                        }
+                    }
+                }
+            ) {}
+        }
+    }
+}
+
+private data class SignActivityPromptItem(
+    val className: String,
+    val timeText: String,
+    val activityName: String,
+    val iconRes: Int?,
+    val destination: Deferred<SignDestination>
+)
+
+@Composable
+private fun SignActivityPromptCard(
+    title: String,
+    items: List<SignActivityPromptItem>,
+    onNavigateToSignActivity: (SignDestination) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val hapticFeedback = LocalHapticFeedback.current
+    val snackbarHost = LocalSnackbarHostState.current
+    val coroutineScope = rememberCoroutineScope()
+    Card(
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items.forEach { item ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp, 8.dp)
+                ) {
+                    Icon(
+                        item.iconRes?.let { painterResource(it) }
+                            ?: painterResource(R.drawable.ic_lightbulb),
+                        null,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .padding(2.dp)
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp)
+                    ) {
+                        Text(
+                            title,
+                            fontSize = 14.sp,
+                            lineHeight = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            buildAnnotatedString {
+                                withStyle(
+                                    SpanStyle(
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                ) {
+                                    append(item.className)
+                                }
+                                append(" 在 ")
+                                withStyle(
+                                    SpanStyle(
+                                        fontFamily = FontApp
+                                    )
+                                ) {
+                                    append(item.timeText)
+                                }
+                                append(" 的 ")
+                                withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                                    append(item.activityName)
+                                }
+                            },
+                            fontSize = 14.sp,
+                            lineHeight = 17.sp,
+                            style = TextStyle.Default.copy(
+                                lineBreak = LineBreak(
+                                    strategy = LineBreak.Strategy.HighQuality,
+                                    strictness = LineBreak.Strictness.Strict,
+                                    wordBreak = LineBreak.WordBreak.Default
+                                )
+                            )
+                        )
+                        Button(
+                            onClick = {
+                                hapticFeedback.performHapticFeedback(
+                                    HapticFeedbackType.ContextClick
+                                )
+                                coroutineScope.launch {
+                                    runCatching { item.destination.await() }
+                                        .onSuccess {
+                                            onNavigateToSignActivity(it)
+                                        }
+                                        .onFailure {
+                                            it.snackbarReport(
+                                                snackbarHost,
+                                                coroutineScope,
+                                                "获取签到活动信息失败",
+                                                hapticFeedback
+                                            )
+                                        }
+                                }
+                            },
+                            shape = RoundedCornerShape(18.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    painter = painterResource(
+                                        R.drawable.ic_clipboard_pen_line
+                                    ),
+                                    null,
+                                    modifier = Modifier.size(
+                                        18.dp
+                                    )
+                                )
+                                Spacer(
+                                    modifier = Modifier.width(
+                                        10.dp
+                                    )
+                                )
+                                Text("前往签到")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,28 +1,101 @@
-plugins { id 'com.android.application' }
+/*
+ * Copyright (c) 2025-2026, @aquamarine5 (@海蓝色的咕咕鸽). All Rights Reserved.
+ * Author: aquamarine5@163.com (Github: https://github.com/aquamarine5) and Brainspark (previously RenegadeCreation)
+ * Repository: https://github.com/aquamarine5/ChaoxingSignFaker
+ */
+
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+    id("com.google.protobuf") version "0.9.6"
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.4.20"
+}
 
 android {
-    namespace 'io.github.rd227.facescan'
-    compileSdk 35
+    namespace = "org.aquamarine5.brainspark.chaoxingsignfaker"
+    compileSdk = 37
     defaultConfig {
-        applicationId 'io.github.rd227.facescan'
-        minSdk 26
-        targetSdk 35
-        versionCode 1
-        versionName '0.1.0-experimental'
+        applicationId = "io.github.rd227.facescan.cleaned"
+        minSdk = 26
+        targetSdk = 37
+        versionCode = 1_1903_0031
+        versionName = "1.19.3-clean.1"
+        manifestPlaceholders = [baiduMapsApiKey: providers.gradleProperty("baiduMapsApiKey").getOrElse("")]
+        buildConfigField("boolean", "isMapConfigured", (!providers.gradleProperty("baiduMapsApiKey").getOrElse("").trim().isEmpty()).toString())
+        ndk { abiFilters "arm64-v8a" }
     }
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+    buildFeatures {
+        buildConfig = true
+        compose = true
     }
     buildTypes {
-        release { minifyEnabled false }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            buildConfigField("String", "releaseDate", "\"${new Date().format('yyyy-MM-dd HH:mm:ss')}\"")
+        }
+        debug {
+            buildConfigField("String", "releaseDate", "\"${new Date().format('yyyy-MM-dd HH:mm:ss')}\"")
+        }
     }
-    lint { abortOnError true }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+}
+
+protobuf {
+    protoc { artifact = "com.google.protobuf:protoc:4.36.2" }
+    generateProtoTasks {
+        all().each { task ->
+            task.builtins { java { option 'lite' } }
+        }
+    }
 }
 
 dependencies {
-    implementation 'androidx.core:core:1.15.0'
-    implementation 'androidx.exifinterface:exifinterface:1.3.7'
-    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
-    testImplementation 'junit:junit:4.13.2'
+    implementation(libs.hyphenate.chat)
+    implementation(libs.reorderable)
+    implementation(libs.lbsyun.base)
+    implementation libs.patternlocker
+    implementation libs.androidx.material
+    implementation(libs.colorpicker.compose)
+    implementation libs.ui
+    implementation libs.core
+    implementation libs.camera.mlkit.vision
+    implementation libs.barcode.scanning
+    implementation libs.androidx.camera.core
+    implementation libs.androidx.camera.camera2
+    implementation libs.androidx.camera.lifecycle
+    implementation libs.androidx.camera.view
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
+    implementation libs.accompanist.permissions
+    implementation libs.baidumapsdk.location
+    implementation libs.kotlinx.serialization.json
+    implementation libs.androidx.navigation.compose
+    implementation libs.androidx.datastore
+    implementation libs.baidumapsdk.map
+    implementation libs.baidumapsdk.search
+    implementation libs.protobuf.javalite
+    implementation(libs.fastjson2)
+    implementation(libs.okhttp)
+    implementation(files("libs/onnxruntime-android-1.29.0-minimal-captcha.aar"))
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.activity.ktx)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.material3)
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.ui.test.junit4)
+    debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.ui.test.manifest)
 }
